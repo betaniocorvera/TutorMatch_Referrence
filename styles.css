@@ -1,0 +1,254 @@
+/* ==========================================================
+   TutorMatch — custom styles (Tailwind handles the rest)
+   Palette: cream #F5EFE6 / soft #FAF7F2 / border #EADFCF
+            accent orange #DE5D35 / ink #161514 / muted #635E59
+   ========================================================== */
+
+:root {
+  --cream: #F5EFE6;
+  --cream-soft: #FAF7F2;
+  --cream-border: #EADFCF;
+  --studio: #DE5D35;
+  --ink: #161514;
+  --muted: #635E59;
+  --error: #B3341A;
+  --ok: #3E7B4F;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--cream);
+  color: var(--ink);
+}
+
+/* ---------- Nav: animated underline ---------- */
+.nav-link { position: relative; padding-bottom: 4px; }
+.nav-link::after {
+  content: '';
+  position: absolute; left: 0; bottom: 0;
+  height: 1.5px; width: 100%;
+  background: var(--studio);
+  transform: scaleX(0); transform-origin: right;
+  transition: transform .35s cubic-bezier(.65, .05, .36, 1);
+}
+.nav-link:hover::after,
+.nav-link:focus-visible::after { transform: scaleX(1); transform-origin: left; }
+
+/* ---------- Entrance animation ---------- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise { opacity: 0; animation: rise .9s cubic-bezier(.2, .7, .2, 1) forwards; }
+.d1 { animation-delay: .1s; }
+.d2 { animation-delay: .22s; }
+.d3 { animation-delay: .36s; }
+.d4 { animation-delay: .5s; }
+.d5 { animation-delay: .64s; }
+
+/* ---------- Overlays (showreel + auth) ---------- */
+#modal, #auth-modal {
+  transition: opacity .35s ease, visibility .35s ease;
+}
+#modal[data-open="false"], #auth-modal[data-open="false"] {
+  opacity: 0; visibility: hidden; pointer-events: none;
+}
+#modal[data-open="true"], #auth-modal[data-open="true"] {
+  opacity: 1; visibility: visible;
+}
+#modal-panel, #auth-panel {
+  transition: transform .45s cubic-bezier(.2, .7, .2, 1);
+}
+#modal[data-open="false"] #modal-panel,
+#auth-modal[data-open="false"] #auth-panel {
+  transform: scale(.94) translateY(12px);
+}
+
+/* ---------- Mobile drawer ---------- */
+#drawer { transition: transform .45s cubic-bezier(.65, .05, .36, 1); }
+#drawer[data-open="false"] {
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform .45s cubic-bezier(.65, .05, .36, 1), visibility 0s .45s;
+}
+#drawer[data-open="true"] { transform: translateX(0); visibility: visible; }
+#scrim { transition: opacity .35s ease, visibility .35s ease; }
+#scrim[data-open="false"] { opacity: 0; visibility: hidden; }
+#scrim[data-open="true"]  { opacity: 1; visibility: visible; }
+
+/* ==========================================================
+   AUTH FORM COMPONENTS
+   ========================================================== */
+
+/* Tabs */
+.auth-tab {
+  border-radius: 9999px;
+  padding: .65rem 1rem;
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--muted);
+  transition: background .3s ease, color .3s ease, box-shadow .3s ease;
+}
+.auth-tab:hover { color: var(--ink); }
+.auth-tab[aria-selected="true"] {
+  background: var(--ink);
+  color: var(--cream);
+  box-shadow: 0 6px 16px -8px rgba(22, 21, 20, .6);
+}
+.auth-tab:focus-visible { outline: 2px solid var(--studio); outline-offset: 2px; }
+
+/* Labels + inputs */
+.field-label {
+  display: block;
+  margin-bottom: .375rem;
+  font-size: .8125rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.field-wrap { position: relative; }
+.field-icon {
+  position: absolute; left: 1rem; top: 50%;
+  width: 1rem; height: 1rem;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.field {
+  width: 100%;
+  border-radius: 9999px;
+  border: 1px solid var(--cream-border);
+  background: var(--cream);
+  padding: .8rem 1.1rem .8rem 2.75rem;
+  font-size: .9375rem;
+  color: var(--ink);
+  transition: border-color .25s ease, box-shadow .25s ease, background .25s ease;
+}
+.field::placeholder { color: #A39C94; }
+.field:hover { border-color: #DACBB5; }
+.field:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--studio);
+  box-shadow: 0 0 0 4px rgba(222, 93, 53, .15);
+}
+.field[aria-invalid="true"] {
+  border-color: var(--error);
+  box-shadow: 0 0 0 4px rgba(179, 52, 26, .1);
+}
+
+.pw-toggle {
+  position: absolute; right: .5rem; top: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.25rem; height: 2.25rem;
+  transform: translateY(-50%);
+  border-radius: 9999px;
+  color: var(--muted);
+  transition: background .2s ease, color .2s ease;
+}
+.pw-toggle:hover { background: var(--cream-border); color: var(--ink); }
+.pw-toggle:focus-visible { outline: 2px solid var(--studio); }
+
+.field-error {
+  min-height: 0;
+  margin-top: .35rem;
+  padding-left: 1rem;
+  font-size: .75rem;
+  font-weight: 500;
+  color: var(--error);
+}
+.field-error:empty { display: none; }
+
+/* Checkbox */
+.check {
+  appearance: none;
+  flex: none;
+  width: 1.125rem; height: 1.125rem;
+  border-radius: .35rem;
+  border: 1.5px solid #CDBFA9;
+  background: var(--cream);
+  display: inline-grid; place-content: center;
+  transition: background .2s ease, border-color .2s ease;
+}
+.check::after {
+  content: '';
+  width: .55rem; height: .3rem;
+  border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  margin-top: -2px;
+  transition: transform .15s ease;
+}
+.check:checked { background: var(--studio); border-color: var(--studio); }
+.check:checked::after { transform: rotate(-45deg) scale(1); }
+.check:focus-visible { outline: 2px solid var(--studio); outline-offset: 2px; }
+
+/* Password strength meter */
+.strength { display: grid; grid-template-columns: repeat(4, 1fr); gap: .35rem; margin-top: .6rem; padding: 0 .25rem; }
+.strength span {
+  height: 4px; border-radius: 9999px;
+  background: var(--cream-border);
+  transition: background .3s ease;
+}
+.strength[data-level="1"] span:nth-child(-n+1) { background: #D9503A; }
+.strength[data-level="2"] span:nth-child(-n+2) { background: var(--studio); }
+.strength[data-level="3"] span:nth-child(-n+3) { background: #D9A233; }
+.strength[data-level="4"] span:nth-child(-n+4) { background: var(--ok); }
+
+/* Form status line */
+.form-status { font-size: .8125rem; font-weight: 600; text-align: center; }
+.form-status:empty { display: none; }
+.form-status[data-type="error"] {
+  color: var(--error);
+  background: rgba(179, 52, 26, .08);
+  border-radius: .9rem; padding: .65rem .9rem;
+}
+.form-status[data-type="success"] {
+  color: var(--ok);
+  background: rgba(62, 123, 79, .1);
+  border-radius: .9rem; padding: .65rem .9rem;
+}
+
+/* Submit button (matches hero CTA) */
+.submit-btn {
+  display: flex; width: 100%;
+  align-items: center; justify-content: space-between;
+  gap: .75rem;
+  border-radius: 9999px;
+  background: var(--ink);
+  padding: .5rem .5rem .5rem 1.75rem;
+  font-size: .9375rem; font-weight: 600;
+  color: var(--cream);
+  box-shadow: 0 10px 30px -10px rgba(22, 21, 20, .55);
+  transition: background .3s ease, box-shadow .3s ease, opacity .2s ease;
+}
+.submit-btn:hover { background: var(--studio); box-shadow: 0 14px 34px -10px rgba(222, 93, 53, .7); }
+.submit-btn:focus-visible { outline: 2px solid var(--studio); outline-offset: 3px; }
+.submit-btn[disabled] { opacity: .65; cursor: progress; }
+.submit-arrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.5rem; height: 2.5rem;
+  border-radius: 9999px;
+  background: var(--cream); color: var(--ink);
+  transition: transform .3s ease;
+}
+.submit-btn:hover .submit-arrow { transform: rotate(45deg); }
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 1.75rem; z-index: 80;
+  transform: translate(-50%, 24px);
+  max-width: calc(100vw - 2rem);
+  border-radius: 9999px;
+  background: var(--ink); color: var(--cream);
+  padding: .8rem 1.4rem;
+  font-size: .875rem; font-weight: 600;
+  box-shadow: 0 18px 40px -12px rgba(22, 21, 20, .6);
+  opacity: 0; visibility: hidden;
+  transition: opacity .35s ease, transform .35s cubic-bezier(.2, .7, .2, 1), visibility .35s;
+}
+.toast[data-show="true"] { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; opacity: 1; }
+  *, *::before, *::after { transition-duration: .01ms !important; }
+}

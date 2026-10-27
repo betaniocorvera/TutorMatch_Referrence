@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TutorMatch — Find the Tutor You Need</title>
+  <meta name="description" content="TutorMatch is a tutoring platform that helps students connect with the right tutors through smart matching, personalized goals and flexible learning." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: { DEFAULT: '#F5EFE6', soft: '#FAF7F2', border: '#EADFCF' },
+            studio: '#DE5D35',
+            ink: '#161514',
+            muted: '#635E59'
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            serif: ['"Instrument Serif"', 'ui-serif', 'Georgia', 'serif']
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body class="bg-cream antialiased">
+
+  <!-- ============ HERO ============ -->
+  <header class="relative w-full min-h-screen overflow-hidden bg-cream" aria-label="TutorMatch hero">
+
+    <!-- Background video -->
+    <video id="bg-video" class="absolute inset-0 w-full h-full object-cover"
+           autoplay loop muted playsinline preload="auto" aria-hidden="true" tabindex="-1">
+      <source src="https://strvid.nyc3.cdn.digitaloceanspaces.com/motionsite/creative_studio_video.mp4" type="video/mp4" />
+    </video>
+
+    <!-- Gradient masks -->
+    <div class="pointer-events-none absolute inset-y-0 left-0 w-full sm:w-[62%] lg:w-[42%] bg-gradient-to-r from-[#F5EFE6] via-[#F5EFE6]/90 to-transparent" aria-hidden="true"></div>
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-48 sm:h-56 lg:h-64 bg-gradient-to-b from-[#F5EFE6] via-[#F5EFE6]/95 via-[#F5EFE6]/60 to-transparent" aria-hidden="true"></div>
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-48 sm:h-56 lg:h-64 bg-gradient-to-t from-[#F5EFE6] via-[#F5EFE6]/95 via-[#F5EFE6]/60 to-transparent" aria-hidden="true"></div>
+
+    <!-- Content wrapper -->
+    <div class="relative z-10 w-full min-h-screen px-6 sm:px-12 lg:px-16 py-6 flex flex-col justify-between">
+
+      <!-- NAV -->
+      <nav class="flex items-center justify-between rise d1" aria-label="Primary">
+        <a href="#" class="text-2xl font-extrabold tracking-tight text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-studio rounded" aria-label="TutorMatch home">
+          TutorMatch<span class="text-studio">.</span>
+        </a>
+
+        <ul class="hidden lg:flex items-center gap-10 text-[15px] font-medium text-ink">
+          <li><a href="#work" class="nav-link focus:outline-none">About us</a></li>
+          <li><a href="#services" class="nav-link focus:outline-none">Services</a></li>
+          <li><a href="#about" class="nav-link focus:outline-none">Find my Match</a></li>
+          <li><a href="#process" class="nav-link focus:outline-none">How It Works</a></li>
+          
+        </ul>
+
+        <div class="flex items-center gap-3">
+          <!-- Guest state -->
+          <div id="auth-guest" class="flex items-center gap-2 sm:gap-4">
+            <button type="button" data-auth-open="login"
+                    class="hidden sm:inline-block nav-link text-[15px] font-semibold text-ink focus:outline-none">
+              Log In
+            </button>
+            <button type="button" data-auth-open="register"
+                    class="hidden sm:inline-flex items-center gap-2 rounded-full border border-ink px-6 py-2.5 text-sm font-semibold text-ink transition-all duration-300 hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-cream group">
+              Sign Up
+              <span class="inline-block transition-transform duration-300 group-hover:translate-x-1" aria-hidden="true">→</span>
+            </button>
+          </div>
+
+          <!-- Signed-in state -->
+          <div id="auth-user" class="hidden items-center gap-3">
+            <span class="hidden sm:flex items-center gap-2.5 rounded-full border border-cream-border bg-cream-soft/80 py-1.5 pl-1.5 pr-4 backdrop-blur">
+              <span id="user-initial" class="flex h-8 w-8 items-center justify-center rounded-full bg-studio text-sm font-bold text-white" aria-hidden="true">M</span>
+              <span class="text-sm font-semibold text-ink">Hi, <span id="user-name">there</span></span>
+            </span>
+            <button type="button" data-auth-logout
+                    class="hidden sm:inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-semibold text-ink transition-all duration-300 hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-cream">
+              Log Out <i data-lucide="log-out" class="h-4 w-4"></i>
+            </button>
+          </div>
+
+          <button id="menu-open" type="button"
+                  class="lg:hidden inline-flex h-11 w-11 items-center justify-center rounded-full border border-ink/80 text-ink transition hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio"
+                  aria-label="Open menu" aria-expanded="false" aria-controls="drawer">
+            <i data-lucide="menu" class="h-5 w-5"></i>
+          </button>
+        </div>
+      </nav>
+
+      <!-- MAIN -->
+      <main class="flex-1 flex items-center py-16 lg:py-10">
+        <div class="max-w-xl">
+          <p class="rise d2 text-[11px] sm:text-xs font-bold uppercase tracking-widest text-studio">
+            • Learn &nbsp;• Connect &nbsp;• Grow
+          </p>
+
+          <h1 class="mt-6 text-[clamp(3.25rem,8.5vw,6.5rem)] leading-[0.98] tracking-tight text-ink">
+            <span class="rise d3 block font-extrabold">Find the Tutor</span>
+            <span class="rise d3 block font-serif italic font-normal text-studio -mt-1 sm:-mt-2" style="animation-delay:.45s">You Need.</span>
+          </h1>
+
+          <p class="rise d4 mt-7 max-w-md text-base sm:text-lg leading-relaxed text-muted">
+            We help students connect with the right tutors through smart matching, personalized goals and flexible learning.
+          </p>
+
+          <div class="rise d5 mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">
+            <button id="showreel-open" type="button"
+                    class="group inline-flex items-center gap-3 rounded-full bg-ink pl-8 pr-3 py-3 text-[15px] font-semibold text-cream shadow-[0_10px_30px_-10px_rgba(22,21,20,.55)] transition-all duration-300 hover:bg-studio hover:shadow-[0_14px_34px_-10px_rgba(222,93,53,.7)] focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+                    aria-haspopup="dialog" aria-controls="modal">
+              Watch How It Works
+              <span class="relative inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-cream text-ink" aria-hidden="true">
+                <i data-lucide="arrow-up-right" class="absolute h-4 w-4 transition-transform duration-300 ease-out group-hover:translate-x-6 group-hover:-translate-y-6"></i>
+                <i data-lucide="arrow-up-right" class="absolute h-4 w-4 -translate-x-6 translate-y-6 transition-transform duration-300 ease-out group-hover:translate-x-0 group-hover:translate-y-0"></i>
+              </span>
+            </button>
+
+            <button id="hero-join" type="button" data-auth-open="register"
+                    class="nav-link text-[15px] font-semibold text-ink focus:outline-none">
+              Become a Tutor
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </header>
+
+  <!-- ============ MOBILE DRAWER ============ -->
+  <div id="scrim" data-open="false" class="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm lg:hidden" aria-hidden="true"></div>
+  <aside id="drawer" data-open="false" class="fixed inset-y-0 right-0 z-50 flex w-[82%] max-w-sm flex-col overflow-y-auto bg-cream-soft px-8 py-6 shadow-2xl lg:hidden" aria-label="Mobile menu">
+    <div class="flex items-center justify-between">
+      <span class="text-2xl font-extrabold tracking-tight">TutorMatch<span class="text-studio">.</span></span>
+      <button id="menu-close" type="button" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-ink/80 text-ink transition hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio" aria-label="Close menu">
+        <i data-lucide="x" class="h-5 w-5"></i>
+      </button>
+    </div>
+    <ul class="mt-10 border-t border-cream-border">
+      <li><a href="#work" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Work <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#services" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Services <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#about" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">About Us <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#process" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Process <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#careers" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Careers <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+    </ul>
+
+    <!-- Drawer auth: guest -->
+    <div id="drawer-guest" class="mt-auto grid gap-3 pt-8">
+      <button type="button" data-auth-open="login"
+              class="drawer-link inline-flex items-center justify-center rounded-full border border-ink px-6 py-4 text-sm font-semibold text-ink transition hover:bg-ink hover:text-cream">
+        Log In
+      </button>
+      <button type="button" data-auth-open="register"
+              class="drawer-link inline-flex items-center justify-center gap-2 rounded-full bg-ink px-6 py-4 text-sm font-semibold text-cream transition hover:bg-studio">
+        Sign Up →
+      </button>
+    </div>
+
+    <!-- Drawer auth: signed in -->
+    <div id="drawer-user" class="mt-auto hidden pt-8">
+      <p class="mb-3 text-sm text-muted">Signed in as <span id="drawer-user-name" class="font-semibold text-ink"></span></p>
+      <button type="button" data-auth-logout
+              class="drawer-link inline-flex w-full items-center justify-center gap-2 rounded-full border border-ink px-6 py-4 text-sm font-semibold text-ink transition hover:bg-ink hover:text-cream">
+        Log Out <i data-lucide="log-out" class="h-4 w-4"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============ SHOWREEL MODAL ============ -->
+  <div id="modal" data-open="false" role="dialog" aria-modal="true" aria-label="TutorMatch intro video"
+       class="fixed inset-0 z-[60] flex items-center justify-center bg-ink/70 p-4 sm:p-8 backdrop-blur-xl">
+    <div id="modal-panel" class="relative w-full max-w-6xl">
+      <button id="modal-close" type="button"
+              class="absolute -top-14 right-0 inline-flex h-11 items-center gap-2 rounded-full bg-cream px-5 text-sm font-semibold text-ink transition hover:bg-studio hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio"
+              aria-label="Close showreel">
+        Close <i data-lucide="x" class="h-4 w-4"></i>
+      </button>
+      <div class="aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+        <video id="modal-video" class="h-full w-full object-cover" playsinline controls preload="none"
+               src="https://strvid.nyc3.cdn.digitaloceanspaces.com/motionsite/creative_studio_video.mp4"></video>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ AUTH MODAL (LOGIN / REGISTER) ============ -->
+  <div id="auth-modal" data-open="false" role="dialog" aria-modal="true" aria-labelledby="auth-title"
+       class="fixed inset-0 z-[70] overflow-y-auto bg-ink/60 p-4 backdrop-blur-xl">
+    <div class="flex min-h-full items-center justify-center">
+      <div id="auth-panel" class="relative w-full max-w-md rounded-3xl border border-cream-border bg-cream-soft p-7 shadow-2xl sm:p-9">
+
+        <button id="auth-close" type="button"
+                class="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cream-border text-ink transition hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio"
+                aria-label="Close">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+
+        <span class="text-xl font-extrabold tracking-tight">TutorMatch<span class="text-studio">.</span></span>
+
+        <h2 id="auth-title" class="mt-6 text-4xl leading-tight tracking-tight text-ink">
+          <span id="auth-title-lead" class="font-extrabold">Welcome</span>
+          <span id="auth-title-accent" class="font-serif italic font-normal text-studio">back.</span>
+        </h2>
+        <p id="auth-subtitle" class="mt-2 text-sm leading-relaxed text-muted">Log in to pick up where you left off.</p>
+
+        <!-- Tabs -->
+        <div class="mt-6 grid grid-cols-2 rounded-full border border-cream-border bg-cream p-1" role="tablist" aria-label="Account">
+          <button id="tab-login" type="button" role="tab" aria-selected="true" aria-controls="login-form" data-tab="login" class="auth-tab">Log In</button>
+          <button id="tab-register" type="button" role="tab" aria-selected="false" aria-controls="register-form" data-tab="register" class="auth-tab" tabindex="-1">Sign Up</button>
+        </div>
+
+        <!-- LOGIN -->
+        <form id="login-form" class="mt-6 space-y-4" role="tabpanel" aria-labelledby="tab-login" novalidate>
+          <div>
+            <label for="login-email" class="field-label">Email</label>
+            <div class="field-wrap">
+              <i data-lucide="mail" class="field-icon"></i>
+              <input id="login-email" name="email" type="email" autocomplete="email" placeholder="you@email.com" class="field" required />
+            </div>
+            <p class="field-error" data-error-for="login-email" role="alert"></p>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between">
+              <label for="login-password" class="field-label">Password</label>
+              <button type="button" id="forgot-btn" class="mb-1.5 text-xs font-semibold text-studio hover:underline focus:outline-none focus-visible:underline">Forgot?</button>
+            </div>
+            <div class="field-wrap">
+              <i data-lucide="lock" class="field-icon"></i>
+              <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Your password" class="field pr-12" required />
+              <button type="button" class="pw-toggle" data-toggle-password="login-password" aria-label="Show password">
+                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
+                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
+              </button>
+            </div>
+            <p class="field-error" data-error-for="login-password" role="alert"></p>
+          </div>
+
+          <label class="flex cursor-pointer items-center gap-2.5 text-sm text-muted">
+            <input id="login-remember" type="checkbox" class="check" />
+            Keep me signed in
+          </label>
+
+          <p id="login-status" class="form-status" role="alert" aria-live="polite"></p>
+
+          <button type="submit" class="submit-btn group">
+            <span>Log In</span>
+            <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
+          </button>
+
+          <p class="pt-1 text-center text-sm text-muted">
+            New to TutorMatch?
+            <button type="button" data-tab="register" class="font-semibold text-ink underline decoration-studio decoration-2 underline-offset-4 hover:text-studio">Create an account</button>
+          </p>
+        </form>
+
+        <!-- REGISTER -->
+        <form id="register-form" class="mt-6 hidden space-y-4" role="tabpanel" aria-labelledby="tab-register" novalidate>
+          <div>
+            <label for="reg-name" class="field-label">Full name</label>
+            <div class="field-wrap">
+              <i data-lucide="user" class="field-icon"></i>
+              <input id="reg-name" name="name" type="text" autocomplete="name" placeholder="Your name" class="field" required />
+            </div>
+            <p class="field-error" data-error-for="reg-name" role="alert"></p>
+          </div>
+
+          <div>
+            <label for="reg-email" class="field-label">Email</label>
+            <div class="field-wrap">
+              <i data-lucide="mail" class="field-icon"></i>
+              <input id="reg-email" name="email" type="email" autocomplete="email" placeholder="you@email.com" class="field" required />
+            </div>
+            <p class="field-error" data-error-for="reg-email" role="alert"></p>
+          </div>
+
+          <div>
+            <label for="reg-password" class="field-label">Password</label>
+            <div class="field-wrap">
+              <i data-lucide="lock" class="field-icon"></i>
+              <input id="reg-password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" class="field pr-12" required />
+              <button type="button" class="pw-toggle" data-toggle-password="reg-password" aria-label="Show password">
+                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
+                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
+              </button>
+            </div>
+            <div class="strength" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <p id="strength-label" class="mt-1 text-xs text-muted">Use 8+ characters with letters and numbers.</p>
+            <p class="field-error" data-error-for="reg-password" role="alert"></p>
+          </div>
+
+          <div>
+            <label for="reg-confirm" class="field-label">Confirm password</label>
+            <div class="field-wrap">
+              <i data-lucide="shield-check" class="field-icon"></i>
+              <input id="reg-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="Repeat password" class="field pr-12" required />
+              <button type="button" class="pw-toggle" data-toggle-password="reg-confirm" aria-label="Show password">
+                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
+                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
+              </button>
+            </div>
+            <p class="field-error" data-error-for="reg-confirm" role="alert"></p>
+          </div>
+
+          <div>
+            <label class="flex cursor-pointer items-start gap-2.5 text-sm leading-snug text-muted">
+              <input id="reg-terms" type="checkbox" class="check mt-0.5" />
+              <span>I agree to the <a href="#terms" class="font-semibold text-ink underline decoration-studio underline-offset-2">Terms</a> and <a href="#privacy" class="font-semibold text-ink underline decoration-studio underline-offset-2">Privacy Policy</a>.</span>
+            </label>
+            <p class="field-error" data-error-for="reg-terms" role="alert"></p>
+          </div>
+
+          <p id="register-status" class="form-status" role="alert" aria-live="polite"></p>
+
+          <button type="submit" class="submit-btn group">
+            <span>Create Account</span>
+            <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
+          </button>
+
+          <p class="pt-1 text-center text-sm text-muted">
+            Already have an account?
+            <button type="button" data-tab="login" class="font-semibold text-ink underline decoration-studio decoration-2 underline-offset-4 hover:text-studio">Log in</button>
+          </p>
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite" data-show="false"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
