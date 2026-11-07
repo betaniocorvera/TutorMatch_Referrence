@@ -60,11 +60,10 @@
         </a>
 
         <ul class="hidden lg:flex items-center gap-10 text-[15px] font-medium text-ink">
-          <li><a href="#work" class="nav-link focus:outline-none">About us</a></li>
+          <li><a href="#about" class="nav-link focus:outline-none">About Us</a></li>
           <li><a href="#services" class="nav-link focus:outline-none">Services</a></li>
-          <li><a href="#about" class="nav-link focus:outline-none">Find my Match</a></li>
-          <li><a href="#process" class="nav-link focus:outline-none">How It Works</a></li>
-          
+          <li><a href="#find-my-match" class="nav-link focus:outline-none">Find My Match</a></li>
+          <li><a href="#how-it-works" class="nav-link focus:outline-none">How It Works</a></li>
         </ul>
 
         <div class="flex items-center gap-3">
@@ -83,10 +82,10 @@
 
           <!-- Signed-in state -->
           <div id="auth-user" class="hidden items-center gap-3">
-            <span class="hidden sm:flex items-center gap-2.5 rounded-full border border-cream-border bg-cream-soft/80 py-1.5 pl-1.5 pr-4 backdrop-blur">
+            <a href="dashboard.html#search" class="hidden sm:flex items-center gap-2.5 rounded-full border border-cream-border bg-cream-soft/80 py-1.5 pl-1.5 pr-4 backdrop-blur focus:outline-none focus-visible:ring-2 focus-visible:ring-studio" aria-label="Open dashboard">
               <span id="user-initial" class="flex h-8 w-8 items-center justify-center rounded-full bg-studio text-sm font-bold text-white" aria-hidden="true">M</span>
               <span class="text-sm font-semibold text-ink">Hi, <span id="user-name">there</span></span>
-            </span>
+            </a>
             <button type="button" data-auth-logout
                     class="hidden sm:inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-semibold text-ink transition-all duration-300 hover:bg-ink hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-cream">
               Log Out <i data-lucide="log-out" class="h-4 w-4"></i>
@@ -128,7 +127,7 @@
               </span>
             </button>
 
-            <button id="hero-join" type="button" data-auth-open="register"
+            <button id="hero-join" type="button" data-auth-open="register" data-role="tutor"
                     class="nav-link text-[15px] font-semibold text-ink focus:outline-none">
               Become a Tutor
             </button>
@@ -137,6 +136,143 @@
       </main>
     </div>
   </header>
+
+  <!-- ============ ABOUT ============ -->
+  <section id="about" class="bg-cream px-6 py-24 sm:px-12 lg:px-16 lg:py-32">
+    <div class="mx-auto grid max-w-6xl gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+      <div>
+        <p class="text-[11px] font-bold uppercase tracking-widest text-studio">About Us</p>
+        <h2 class="mt-4 text-4xl leading-[1.05] tracking-tight text-ink sm:text-5xl lg:text-6xl">
+          Built for learners<br />
+          <span class="font-serif italic font-normal text-studio">in Cabadbaran.</span>
+        </h2>
+      </div>
+      <div class="max-w-xl lg:justify-self-end">
+        <p class="text-base leading-relaxed text-muted sm:text-lg">
+          TutorMatch A.I. is a local tutoring platform that helps students find the right tutor without the guesswork. We look at subject, budget, distance and availability, then rank the best matches for you.
+        </p>
+        <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div class="rounded-2xl border border-cream-border bg-cream-soft p-4">
+            <p class="text-sm font-bold text-ink">Subject-first</p>
+            <p class="mt-1 text-xs leading-relaxed text-muted">Matches based on what you need to learn.</p>
+          </div>
+          <div class="rounded-2xl border border-cream-border bg-cream-soft p-4">
+            <p class="text-sm font-bold text-ink">Local</p>
+            <p class="mt-1 text-xs leading-relaxed text-muted">Focused on Cabadbaran City and nearby areas.</p>
+          </div>
+          <div class="rounded-2xl border border-cream-border bg-cream-soft p-4">
+            <p class="text-sm font-bold text-ink">Flexible</p>
+            <p class="mt-1 text-xs leading-relaxed text-muted">Budget and schedule aware from the start.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SERVICES ============ -->
+  <section id="services" class="bg-cream-soft px-6 py-24 sm:px-12 lg:px-16 lg:py-32">
+    <div class="mx-auto max-w-6xl">
+      <div class="max-w-2xl">
+        <p class="text-[11px] font-bold uppercase tracking-widest text-studio">Services</p>
+        <h2 class="mt-4 text-4xl leading-[1.05] tracking-tight text-ink sm:text-5xl lg:text-6xl">
+          Everything you need to<br />
+          <span class="font-serif italic font-normal text-studio">find your match.</span>
+        </h2>
+      </div>
+      <div class="mt-12 grid gap-5 md:grid-cols-3">
+        <article class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-studio/10 text-studio" aria-hidden="true">
+            <i data-lucide="sparkles" class="h-5 w-5"></i>
+          </span>
+          <h3 class="mt-5 text-xl font-bold tracking-tight text-ink">Smart Matching</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Ranked tutor suggestions based on subject, budget, distance and availability.</p>
+        </article>
+        <article class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-studio/10 text-studio" aria-hidden="true">
+            <i data-lucide="shield-check" class="h-5 w-5"></i>
+          </span>
+          <h3 class="mt-5 text-xl font-bold tracking-tight text-ink">Verified Accounts</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Email-verified students and tutors, with secure sessions and password resets.</p>
+        </article>
+        <article class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-studio/10 text-studio" aria-hidden="true">
+            <i data-lucide="clock" class="h-5 w-5"></i>
+          </span>
+          <h3 class="mt-5 text-xl font-bold tracking-tight text-ink">Flexible Learning</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Compare schedules and send a request only when the fit feels right.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FIND MY MATCH ============ -->
+  <section id="find-my-match" class="bg-cream px-6 py-24 sm:px-12 lg:px-16 lg:py-32">
+    <div class="mx-auto max-w-6xl overflow-hidden rounded-[2rem] bg-ink px-8 py-14 text-cream sm:px-14 lg:px-20 lg:py-20">
+      <div class="grid gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-widest text-studio">Find My Match</p>
+          <h2 class="mt-4 text-4xl leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
+            Your next tutor is<br />
+            <span class="font-serif italic font-normal text-studio">one match away.</span>
+          </h2>
+          <p class="mt-5 max-w-xl text-base leading-relaxed text-cream/70">
+            Create a free profile, tell us what you need, and see ranked matches in seconds. Students and tutors both start here.
+          </p>
+        </div>
+        <div>
+          <div class="flex flex-col gap-3" data-guest-only>
+            <button type="button" data-auth-open="register" data-role="student"
+                    class="group inline-flex items-center justify-between gap-3 rounded-full bg-cream px-6 py-4 text-sm font-semibold text-ink transition hover:bg-studio hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
+              Find a Tutor
+              <i data-lucide="arrow-up-right" class="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1"></i>
+            </button>
+            <button type="button" data-auth-open="register" data-role="tutor"
+                    class="group inline-flex items-center justify-between gap-3 rounded-full border border-cream/30 px-6 py-4 text-sm font-semibold text-cream transition hover:border-studio hover:text-studio focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
+              Become a Tutor
+              <i data-lucide="arrow-up-right" class="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1"></i>
+            </button>
+          </div>
+          <div class="hidden" data-user-only>
+            <a href="dashboard.html#search"
+               class="inline-flex w-full items-center justify-between gap-3 rounded-full bg-cream px-6 py-4 text-sm font-semibold text-ink transition hover:bg-studio hover:text-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-studio focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
+              Open Dashboard
+              <i data-lucide="arrow-up-right" class="h-4 w-4"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section id="how-it-works" class="bg-cream-soft px-6 py-24 sm:px-12 lg:px-16 lg:py-32">
+    <div class="mx-auto max-w-6xl">
+      <div class="max-w-2xl">
+        <p class="text-[11px] font-bold uppercase tracking-widest text-studio">How It Works</p>
+        <h2 class="mt-4 text-4xl leading-[1.05] tracking-tight text-ink sm:text-5xl lg:text-6xl">
+          From hello to<br />
+          <span class="font-serif italic font-normal text-studio">first lesson.</span>
+        </h2>
+      </div>
+      <ol class="mt-12 grid gap-5 md:grid-cols-3">
+        <li class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="text-sm font-bold tracking-widest text-studio">01</span>
+          <h3 class="mt-4 text-xl font-bold tracking-tight text-ink">Create your profile</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Sign up as a student or tutor, then verify your email to keep the community secure.</p>
+        </li>
+        <li class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="text-sm font-bold tracking-widest text-studio">02</span>
+          <h3 class="mt-4 text-xl font-bold tracking-tight text-ink">See ranked matches</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Filter by subject, budget, distance and availability to narrow the list.</p>
+        </li>
+        <li class="rounded-3xl border border-cream-border bg-cream p-7">
+          <span class="text-sm font-bold tracking-widest text-studio">03</span>
+          <h3 class="mt-4 text-xl font-bold tracking-tight text-ink">Connect and learn</h3>
+          <p class="mt-2 text-sm leading-relaxed text-muted">Send a request, review the profile, and start learning with the right fit.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
 
   <!-- ============ MOBILE DRAWER ============ -->
   <div id="scrim" data-open="false" class="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm lg:hidden" aria-hidden="true"></div>
@@ -148,11 +284,10 @@
       </button>
     </div>
     <ul class="mt-10 border-t border-cream-border">
-      <li><a href="#work" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Work <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
-      <li><a href="#services" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Services <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
       <li><a href="#about" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">About Us <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
-      <li><a href="#process" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Process <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
-      <li><a href="#careers" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Careers <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#services" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Services <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#find-my-match" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">Find My Match <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
+      <li><a href="#how-it-works" class="drawer-link flex items-center justify-between border-b border-cream-border py-4 text-2xl font-semibold">How It Works <i data-lucide="arrow-up-right" class="h-5 w-5 text-studio"></i></a></li>
     </ul>
 
     <!-- Drawer auth: guest -->
@@ -170,6 +305,10 @@
     <!-- Drawer auth: signed in -->
     <div id="drawer-user" class="mt-auto hidden pt-8">
       <p class="mb-3 text-sm text-muted">Signed in as <span id="drawer-user-name" class="font-semibold text-ink"></span></p>
+      <a href="dashboard.html#search"
+         class="drawer-link mb-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-6 py-4 text-sm font-semibold text-cream transition hover:bg-studio">
+        Open Dashboard <i data-lucide="arrow-up-right" class="h-4 w-4"></i>
+      </a>
       <button type="button" data-auth-logout
               class="drawer-link inline-flex w-full items-center justify-center gap-2 rounded-full border border-ink px-6 py-4 text-sm font-semibold text-ink transition hover:bg-ink hover:text-cream">
         Log Out <i data-lucide="log-out" class="h-4 w-4"></i>
@@ -214,13 +353,15 @@
         <p id="auth-subtitle" class="mt-2 text-sm leading-relaxed text-muted">Log in to pick up where you left off.</p>
 
         <!-- Tabs -->
-        <div class="mt-6 grid grid-cols-2 rounded-full border border-cream-border bg-cream p-1" role="tablist" aria-label="Account">
+        <div id="auth-tabs" class="mt-6 grid grid-cols-2 rounded-full border border-cream-border bg-cream p-1" role="tablist" aria-label="Account">
           <button id="tab-login" type="button" role="tab" aria-selected="true" aria-controls="login-form" data-tab="login" class="auth-tab">Log In</button>
           <button id="tab-register" type="button" role="tab" aria-selected="false" aria-controls="register-form" data-tab="register" class="auth-tab" tabindex="-1">Sign Up</button>
         </div>
 
         <!-- LOGIN -->
         <form id="login-form" class="mt-6 space-y-4" role="tabpanel" aria-labelledby="tab-login" novalidate>
+          <!-- CSRF token: filled by script.js from GET /api/csrf -->
+          <input type="hidden" id="login-csrf" name="csrf_token" value="" />
           <div>
             <label for="login-email" class="field-label">Email</label>
             <div class="field-wrap">
@@ -247,7 +388,7 @@
           </div>
 
           <label class="flex cursor-pointer items-center gap-2.5 text-sm text-muted">
-            <input id="login-remember" type="checkbox" class="check" />
+            <input id="login-remember" name="remember" type="checkbox" class="check" />
             Keep me signed in
           </label>
 
@@ -266,6 +407,29 @@
 
         <!-- REGISTER -->
         <form id="register-form" class="mt-6 hidden space-y-4" role="tabpanel" aria-labelledby="tab-register" novalidate>
+          <!-- CSRF token: filled by script.js from GET /api/csrf -->
+          <input type="hidden" id="register-csrf" name="csrf_token" value="" />
+
+          <fieldset class="role-fieldset">
+            <legend class="field-label">I am a</legend>
+            <div class="role-grid">
+              <label class="role-card" data-role-card="student" data-selected="true">
+                <input type="radio" name="role" value="student" class="role-radio" checked />
+                <span class="role-icon" aria-hidden="true"><i data-lucide="graduation-cap" class="h-4 w-4"></i></span>
+                <span class="role-title">Student</span>
+                <span class="role-desc">Find a tutor</span>
+              </label>
+              <label class="role-card" data-role-card="tutor" data-selected="false">
+                <input type="radio" name="role" value="tutor" class="role-radio" />
+                <span class="role-icon" aria-hidden="true"><i data-lucide="book-open" class="h-4 w-4"></i></span>
+                <span class="role-title">Tutor</span>
+                <span class="role-desc">Find students</span>
+              </label>
+            </div>
+            <p id="role-helper" class="role-helper">You'll see tutors who match your subject, budget and schedule.</p>
+            <p class="role-note">Role can't be changed later.</p>
+          </fieldset>
+
           <div>
             <label for="reg-name" class="field-label">Full name</label>
             <div class="field-wrap">
@@ -316,7 +480,7 @@
 
           <div>
             <label class="flex cursor-pointer items-start gap-2.5 text-sm leading-snug text-muted">
-              <input id="reg-terms" type="checkbox" class="check mt-0.5" />
+              <input id="reg-terms" name="terms" type="checkbox" class="check mt-0.5" />
               <span>I agree to the <a href="#terms" class="font-semibold text-ink underline decoration-studio underline-offset-2">Terms</a> and <a href="#privacy" class="font-semibold text-ink underline decoration-studio underline-offset-2">Privacy Policy</a>.</span>
             </label>
             <p class="field-error" data-error-for="reg-terms" role="alert"></p>
@@ -335,6 +499,87 @@
           </p>
         </form>
 
+        <!-- VERIFY EMAIL -->
+        <form id="verify-form" class="mt-6 hidden space-y-4" role="tabpanel" novalidate>
+          <input type="hidden" id="verify-email" name="email" value="" />
+
+          <div class="rounded-2xl border border-cream-border bg-cream px-4 py-3 text-sm text-muted">
+            <p class="font-semibold text-ink">Code sent to</p>
+            <p id="verify-email-display" class="mt-0.5 break-all"></p>
+            <p class="mt-2 text-xs leading-relaxed">
+              In demo mode the code is printed in the Flask terminal and saved to
+              <span class="font-mono text-ink">outbox.log</span>.
+            </p>
+          </div>
+
+          <div>
+            <label for="verify-otp" class="field-label">6-digit code</label>
+            <div class="field-wrap">
+              <i data-lucide="shield-check" class="field-icon"></i>
+              <input id="verify-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
+                     pattern="[0-9]*" maxlength="6" placeholder="000000" class="field tracking-[0.35em]" required />
+            </div>
+            <p class="field-error" data-error-for="verify-otp" role="alert"></p>
+          </div>
+
+          <p id="verify-status" class="form-status" role="alert" aria-live="polite"></p>
+
+          <button type="submit" class="submit-btn group">
+            <span>Verify Email</span>
+            <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
+          </button>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-sm text-muted">
+            <button type="button" id="resend-otp" class="font-semibold text-ink underline decoration-studio decoration-2 underline-offset-4 hover:text-studio">Resend code</button>
+            <button type="button" data-tab="login" class="font-semibold text-ink underline decoration-studio decoration-2 underline-offset-4 hover:text-studio">Back to log in</button>
+          </div>
+        </form>
+
+        <!-- RESET PASSWORD -->
+        <form id="reset-form" class="mt-6 hidden space-y-4" role="tabpanel" novalidate>
+          <input type="hidden" id="reset-token" name="token" value="" />
+
+          <div>
+            <label for="reset-password" class="field-label">New password</label>
+            <div class="field-wrap">
+              <i data-lucide="lock" class="field-icon"></i>
+              <input id="reset-password" name="password" type="password" autocomplete="new-password"
+                     placeholder="At least 8 characters" class="field pr-12" required />
+              <button type="button" class="pw-toggle" data-toggle-password="reset-password" aria-label="Show password">
+                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
+                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
+              </button>
+            </div>
+            <p class="field-error" data-error-for="reset-password" role="alert"></p>
+          </div>
+
+          <div>
+            <label for="reset-confirm" class="field-label">Confirm new password</label>
+            <div class="field-wrap">
+              <i data-lucide="shield-check" class="field-icon"></i>
+              <input id="reset-confirm" name="confirm" type="password" autocomplete="new-password"
+                     placeholder="Repeat password" class="field pr-12" required />
+              <button type="button" class="pw-toggle" data-toggle-password="reset-confirm" aria-label="Show password">
+                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
+                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
+              </button>
+            </div>
+            <p class="field-error" data-error-for="reset-confirm" role="alert"></p>
+          </div>
+
+          <p id="reset-status" class="form-status" role="alert" aria-live="polite"></p>
+
+          <button type="submit" class="submit-btn group">
+            <span>Update Password</span>
+            <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
+          </button>
+
+          <p class="pt-1 text-center text-sm text-muted">
+            Remembered it?
+            <button type="button" data-tab="login" class="font-semibold text-ink underline decoration-studio decoration-2 underline-offset-4 hover:text-studio">Back to log in</button>
+          </p>
+        </form>
+
       </div>
     </div>
   </div>
@@ -342,6 +587,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" data-show="false"></div>
 
+  <script src="js/auth.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

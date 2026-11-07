@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TutorMatch A.I. — Dashboard</title>
+  <meta name="description" content="TutorMatch A.I. dashboard — search for tutors or students and view ranked matches." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: { DEFAULT: '#F5EFE6', soft: '#FAF7F2', border: '#EADFCF' },
+            studio: '#DE5D35',
+            ink: '#161514',
+            muted: '#635E59'
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            serif: ['"Instrument Serif"', 'ui-serif', 'Georgia', 'serif']
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+
+<body class="dashboard-body antialiased">
+  <div class="app-shell">
+    <div id="sidebar-scrim" class="sidebar-scrim" data-open="false" aria-hidden="true"></div>
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside id="sidebar" class="sidebar" data-open="false" aria-label="Dashboard navigation">
+      <div class="sidebar-top">
+        <a href="dashboard.html#search" class="sidebar-logo">TutorMatch <span>A.I.</span></a>
+        <button id="sidebar-close" type="button" class="icon-btn sidebar-close" aria-label="Close navigation">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Dashboard sections">
+        <a href="#search" class="side-link" data-section="search">
+          <i data-lucide="search"></i>
+          <span>Search</span>
+        </a>
+        <a href="#profile" class="side-link" data-section="profile">
+          <i data-lucide="user-round"></i>
+          <span>Profile</span>
+        </a>
+        <a href="#messages" class="side-link" data-section="messages">
+          <i data-lucide="message-circle"></i>
+          <span>Messages</span>
+          <span id="messages-badge" class="side-badge hidden" aria-label="Unread messages">0</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-user">
+        <div id="sidebar-avatar" class="user-avatar" aria-hidden="true">S</div>
+        <div class="user-meta">
+          <p id="sidebar-name" class="user-name">Student Name</p>
+          <p class="user-role"><span id="sidebar-role">Student</span> · <button type="button" id="logout-btn" class="logout-link">Log out</button></p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main-wrap">
+      <header class="mobile-topbar">
+        <button id="sidebar-open" type="button" class="mobile-menu" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+          <i data-lucide="menu" class="h-5 w-5"></i>
+        </button>
+        <a href="#search" class="mobile-logo">TutorMatch <span>A.I.</span></a>
+      </header>
+
+      <main class="main-content">
+        <!-- ============ SEARCH ============ -->
+        <section id="section-search" class="app-section" data-section="search" aria-labelledby="search-title">
+          <div class="page-head">
+            <h1 id="search-title">Find a tutor</h1>
+            <p id="search-subtitle">Students see tutors · Tutors see students. Results appear only after you search.</p>
+          </div>
+
+          <form id="search-form" class="search-form" role="search">
+            <div class="search-pill">
+              <i data-lucide="search" class="search-icon"></i>
+              <input id="search-input" type="search" autocomplete="off"
+                     placeholder='Search subject, e.g. "Algebra", "Python", "IELTS"'
+                     aria-label="Search by subject" />
+            </div>
+            <button type="submit" class="btn-dark search-btn">Search</button>
+          </form>
+
+          <div class="filter-bar">
+            <div class="filter-grid">
+              <label class="filter-field" for="filter-subject">
+                <span>Subject</span>
+                <select id="filter-subject">
+                  <option value="all">Any subject</option>
+                  <option value="Mathematics">Mathematics</option>
+                  <option value="Algebra">Algebra</option>
+                  <option value="Calculus">Calculus</option>
+                  <option value="Physics">Physics</option>
+                  <option value="Chemistry">Chemistry</option>
+                  <option value="Biology">Biology</option>
+                  <option value="English">English</option>
+                  <option value="IELTS">IELTS</option>
+                  <option value="Python">Python</option>
+                </select>
+              </label>
+
+              <label class="filter-field" for="filter-format">
+                <span>Format</span>
+                <select id="filter-format">
+                  <option value="any">Any format</option>
+                  <option value="online">Online</option>
+                  <option value="in-person">In-person</option>
+                  <option value="either">Either</option>
+                </select>
+              </label>
+
+              <label class="filter-field" for="filter-price">
+                <span>Price</span>
+                <select id="filter-price">
+                  <option value="any">Any price</option>
+                  <option value="under-15">Under $15 / hr</option>
+                  <option value="15-25">$15–$25 / hr</option>
+                  <option value="25-35">$25–$35 / hr</option>
+                  <option value="35-plus">$35+ / hr</option>
+                </select>
+              </label>
+
+              <label class="filter-field" for="filter-availability">
+                <span>Availability</span>
+                <select id="filter-availability">
+                  <option value="any">Any time</option>
+                  <option value="weekday-am">Weekday mornings</option>
+                  <option value="weekday-pm">Weekday afternoons</option>
+                  <option value="weekday-eve">Weekday evenings</option>
+                  <option value="weekend">Weekends</option>
+                </select>
+              </label>
+
+              <label class="filter-field" for="filter-distance">
+                <span>Distance</span>
+                <select id="filter-distance">
+                  <option value="any">Any distance</option>
+                  <option value="5" selected>Within 5 km</option>
+                  <option value="10">Within 10 km</option>
+                  <option value="25">Within 25 km</option>
+                  <option value="50">Within 50 km</option>
+                </select>
+              </label>
+            </div>
+
+            <button type="button" id="clear-filters" class="clear-filters">Clear filters</button>
+          </div>
+
+          <div class="info-banner" role="status">
+            <i data-lucide="info"></i>
+            <p id="profile-banner">Profile 65% complete — add your availability and learning goal to improve your matches.</p>
+          </div>
+
+          <div id="results-meta" class="results-meta" hidden></div>
+          <div id="search-state" class="search-state" aria-live="polite"></div>
+        </section>
+
+        <!-- ============ PROFILE ============ -->
+        <section id="section-profile" class="app-section hidden" data-section="profile" aria-labelledby="profile-title">
+          <div class="page-head">
+            <h1 id="profile-title">Profile</h1>
+            <p>How your TutorMatch profile looks and how complete it is.</p>
+          </div>
+
+          <div class="panel-card">
+            <div class="profile-summary">
+              <div id="profile-page-avatar" class="avatar-lg" aria-hidden="true">S</div>
+              <div>
+                <h2 id="profile-page-name">Student Name</h2>
+                <p id="profile-page-role">Student</p>
+                <p id="profile-page-email"></p>
+              </div>
+            </div>
+
+            <div class="completeness">
+              <div class="completeness-head">
+                <span>Profile completeness</span>
+                <span id="profile-page-percent">65%</span>
+              </div>
+              <div class="completeness-track" role="progressbar" aria-label="Profile completeness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65">
+                <div id="profile-page-fill" class="completeness-fill" style="width:65%"></div>
+              </div>
+            </div>
+
+            <p class="muted-note">Profile editing will be added in the next phase. The completeness value feeds the Search banner.</p>
+          </div>
+        </section>
+
+        <!-- ============ MESSAGES ============ -->
+        <section id="section-messages" class="app-section hidden" data-section="messages" aria-labelledby="messages-title">
+          <div class="page-head">
+            <h1 id="messages-title">Messages</h1>
+            <p>Requests you send from Search appear here.</p>
+          </div>
+
+          <div class="panel-card">
+            <h2 class="text-base font-extrabold text-ink">Sent requests</h2>
+            <div id="sent-requests" class="sent-list"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ PUBLIC PROFILE SIDE PANEL ============ -->
+  <div id="profile-panel" class="profile-panel" data-open="false" role="dialog" aria-modal="true" aria-labelledby="profile-panel-title">
+    <div class="profile-panel-backdrop" data-close-panel></div>
+    <aside class="profile-panel-card" tabindex="-1">
+      <div class="profile-panel-head">
+        <div>
+          <p class="eyebrow">Public profile preview</p>
+          <h2 id="profile-panel-title">Profile</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-panel aria-label="Close profile">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+      <div id="profile-panel-body"></div>
+    </aside>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite" data-show="false"></div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/profile.js"></script>
+  <script src="js/messages.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>
