@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Set up your TutorMatch A.I. profile." />
+  <title>TutorMatch A.I. — Set up your profile</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: '#F5EFE6',
+            soft: '#FAF7F2',
+            border: '#EADFCF',
+            studio: '#DE5D35',
+            ink: '#161514',
+            muted: '#635E59'
+          },
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="onboarding.css" />
+</head>
+<body class="dashboard-body onboarding-body antialiased">
+  <header class="onboarding-header">
+    <a href="index.html" class="onboarding-logo" aria-label="TutorMatch A.I. home">
+      TutorMatch <span>A.I.</span>
+    </a>
+    <div class="onboarding-header-actions">
+      <span id="save-indicator" class="save-indicator" data-state="idle" aria-live="polite">Saved</span>
+      <button type="button" class="btn-outline" data-action="save-exit">
+        Save &amp; exit
+      </button>
+    </div>
+  </header>
+
+  <main class="onboarding-shell">
+    <div id="onboarding-loading" class="loading-card" role="status" aria-live="polite">
+      <span class="loading-dot" aria-hidden="true"></span>
+      Loading your profile…
+    </div>
+
+    <div id="onboarding-app" class="hidden">
+      <div class="onboarding-intro">
+        <p class="eyebrow">Profile setup</p>
+        <h1 id="wizard-title">Let's build your TutorMatch profile</h1>
+        <p id="wizard-subtitle">
+          A few details help us match you with the right people. Your progress saves automatically.
+        </p>
+      </div>
+
+      <div class="onboarding-layout">
+        <aside class="step-rail" aria-label="Onboarding steps">
+          <div class="step-rail-progress">
+            <span id="step-counter">Step 1 of 7</span>
+            <div class="wizard-progress" role="progressbar" aria-valuemin="1" aria-valuemax="7" aria-valuenow="1" aria-label="Onboarding progress">
+              <span id="wizard-progress-fill"></span>
+            </div>
+          </div>
+
+          <ol id="step-list" class="step-list"></ol>
+
+          <div class="completeness-card">
+            <div class="completeness-head">
+              <span>Profile completeness</span>
+              <span id="ob-percent">0%</span>
+            </div>
+            <div id="ob-track" class="completeness-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Profile completeness">
+              <div id="ob-fill" class="completeness-fill" style="width: 0%"></div>
+            </div>
+            <p id="ob-status-text" class="completeness-note">
+              Complete the required items to appear in search.
+            </p>
+            <ul id="missing-list" class="missing-list"></ul>
+          </div>
+        </aside>
+
+        <section class="wizard-card" aria-live="polite">
+          <div id="wizard-status" class="wizard-status" role="status" aria-live="polite"></div>
+
+          <div id="step-panels">
+            <!-- Step 1: Basics -->
+            <section class="step-panel is-active" data-panel="1">
+              <div class="step-head">
+                <p class="eyebrow">Step 1</p>
+                <h2 tabindex="-1">The basics</h2>
+                <p>Start with a photo and a short introduction. Your birthdate stays private.</p>
+              </div>
+
+              <div class="photo-row">
+                <div id="ob-photo-preview" class="photo-preview" aria-hidden="true"></div>
+                <div class="photo-copy">
+                  <button type="button" class="btn-outline" data-action="choose-photo">
+                    Upload photo
+                  </button>
+                  <input id="ob-photo" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" />
+                  <p class="muted-note">Optional. JPG, PNG, or WebP under 1 MB.</p>
+                </div>
+              </div>
+
+              <div class="field-grid">
+                <div class="field-block">
+                  <label class="field-label" for="ob-name">Display name</label>
+                  <input id="ob-name" class="ob-field" type="text" maxlength="80" autocomplete="name" placeholder="Your name" />
+                  <p class="ob-error" data-error-for="name"></p>
+                </div>
+
+                <div class="field-block">
+                  <label class="field-label" for="ob-headline">Headline <span class="optional">optional</span></label>
+                  <input id="ob-headline" class="ob-field" type="text" maxlength="120" placeholder="e.g. Math &amp; Calculus tutor" />
+                  <p class="ob-error" data-error-for="headline"></p>
+                </div>
+
+                <div class="field-block field-block-wide">
+                  <label class="field-label" for="ob-bio">Short bio</label>
+                  <textarea id="ob-bio" class="ob-field ob-textarea" rows="5" maxlength="600" placeholder="What do you teach or what are you working on?"></textarea>
+                  <div class="field-meta">
+                    <span>At least 10 characters. Keep it friendly and specific.</span>
+                    <span id="ob-bio-count">0/600</span>
+                  </div>
+                  <p class="ob-error" data-error-for="bio"></p>
+                </div>
+
+                <div class="field-block">
+                  <label class="field-label" for="ob-birthdate">Birthdate <span class="optional">private</span></label>
+                  <input id="ob-birthdate" class="ob-field" type="date" />
+                  <p class="ob-error" data-error-for="birthdate"></p>
+                </div>
+
+                <div class="field-block">
+                  <label class="field-label" for="ob-status">Status</label>
+                  <select id="ob-status" class="ob-field ob-select">
+                    <option value="active">Active</option>
+                    <option value="accepting">Accepting students</option>
+                    <option value="away">Away</option>
+                    <option value="not_accepting">Not accepting right now</option>
+                  </select>
+                  <p class="ob-error" data-error-for="status"></p>
+                </div>
+              </div>
+            </section>
+
+            <!-- Step 2: Subjects -->
+            <section class="step-panel" data-panel="2">
+              <div class="step-head">
+                <p class="eyebrow">Step 2</p>
+                <h2 tabindex="-1">Subjects and levels</h2>
+                <p id="subjects-role-hint">Choose what you teach or what you need help with.</p>
+              </div>
+
+              <div class="section-toolbar">
+                <label class="subject-search">
+                  <i data-lucide="search" class="subject-search-icon" aria-hidden="true"></i>
+                  <input id="subject-search" type="search" placeholder="Search subjects" aria-label="Search subjects" autocomplete="off" />
+                </label>
+                <span id="subject-count" class="selection-count">0 selected</span>
+              </div>
+
+              <div id="subject-list" class="subject-list"></div>
+              <p id="subjects-error" class="ob-error" data-error-for="subjects"></p>
+              <p class="muted-note">Pick up to 8. Each subject gets its own level.</p>
+            </section>
+
+            <!-- Step 3: Goals and style -->
+            <section class="step-panel" data-panel="3">
+              <div class="step-head">
+                <p class="eyebrow">Step 3</p>
+                <h2 tabindex="-1">Goals and style</h2>
+                <p id="tags-role-hint">Tell people how you like to learn or teach. This is recommended, not required.</p>
+              </div>
+
+              <div class="tag-section">
+                <h3>What are you working toward?</h3>
+                <div id="goal-tags" class="tag-list" role="group" aria-label="Learning goals"></div>
+              </div>
+
+              <div class="tag-section">
+                <h3>How do you like sessions to feel?</h3>
+                <div id="style-tags" class="tag-list" role="group" aria-label="Teaching or learning style"></div>
+              </div>
+              <p class="ob-error" data-error-for="goalTags"></p>
+              <p class="ob-error" data-error-for="styleTags"></p>
+            </section>
+
+            <!-- Step 4: Availability -->
+            <section class="step-panel" data-panel="4">
+              <div class="step-head">
+                <p class="eyebrow">Step 4</p>
+                <h2 tabindex="-1">Weekly availability</h2>
+                <p>Tap the blocks when you are usually free. Times are Asia/Manila.</p>
+              </div>
+
+              <div class="availability-wrap">
+                <div id="availability-grid" class="availability-grid" role="group" aria-label="Weekly availability"></div>
+              </div>
+              <p id="availability-error" class="ob-error" data-error-for="availability"></p>
+              <p class="muted-note">Pick at least one block. You can change this later.</p>
+            </section>
+
+            <!-- Step 5: Rate and format -->
+            <section class="step-panel" data-panel="5">
+              <div class="step-head">
+                <p class="eyebrow">Step 5</p>
+                <h2 tabindex="-1">Rate and format</h2>
+                <p id="price-role-hint">Set your hourly rate and how you want to meet.</p>
+              </div>
+
+              <div id="tutor-rate-wrap" class="field-grid">
+                <div class="field-block">
+                  <label class="field-label" for="ob-rate">Hourly rate (PHP)</label>
+                  <div class="money-field">
+                    <span>₱</span>
+                    <input id="ob-rate" class="ob-field" type="number" min="0" max="10000" step="1" inputmode="numeric" placeholder="350" />
+                  </div>
+                  <p class="ob-error" data-error-for="rate"></p>
+                </div>
+              </div>
+
+              <div id="student-budget-wrap" class="field-grid hidden">
+                <div class="field-block">
+                  <label class="field-label" for="ob-budget-min">Budget minimum (PHP)</label>
+                  <div class="money-field">
+                    <span>₱</span>
+                    <input id="ob-budget-min" class="ob-field" type="number" min="0" max="10000" step="1" inputmode="numeric" placeholder="200" />
+                  </div>
+                </div>
+                <div class="field-block">
+                  <label class="field-label" for="ob-budget-max">Budget maximum (PHP)</label>
+                  <div class="money-field">
+                    <span>₱</span>
+                    <input id="ob-budget-max" class="ob-field" type="number" min="0" max="10000" step="1" inputmode="numeric" placeholder="500" />
+                  </div>
+                  <p class="ob-error" data-error-for="budget"></p>
+                </div>
+              </div>
+
+              <div class="tag-section">
+                <h3>Session format</h3>
+                <div id="format-options" class="format-grid" role="group" aria-label="Session format"></div>
+                <p class="ob-error" data-error-for="format"></p>
+              </div>
+            </section>
+
+            <!-- Step 6: Area -->
+            <section class="step-panel" data-panel="6">
+              <div class="step-head">
+                <p class="eyebrow">Step 6</p>
+                <h2 tabindex="-1">Your area</h2>
+                <p>We only show your barangay, never your exact address.</p>
+              </div>
+
+              <div class="field-grid">
+                <div class="field-block">
+                  <label class="field-label" for="ob-barangay">Barangay</label>
+                  <input id="ob-barangay" class="ob-field" type="text" maxlength="80" placeholder="e.g. Del Pilar" />
+                  <p class="ob-error" data-error-for="area"></p>
+                </div>
+                <div class="field-block">
+                  <label class="field-label" for="ob-city">City or municipality</label>
+                  <input id="ob-city" class="ob-field" type="text" maxlength="80" placeholder="Cabadbaran City" />
+                  <p class="ob-error" data-error-for="city"></p>
+                </div>
+              </div>
+
+              <p class="privacy-note">
+                <i data-lucide="shield-check" aria-hidden="true"></i>
+                Your email, birthdate, and exact address stay private. Search results only show your barangay and city.
+              </p>
+            </section>
+
+            <!-- Step 7: Preview -->
+            <section class="step-panel" data-panel="7">
+              <div class="step-head">
+                <p class="eyebrow">Step 7</p>
+                <h2 tabindex="-1">Review your profile</h2>
+                <p>This is how other people will see you. You can edit everything later.</p>
+              </div>
+
+              <div id="preview-root" class="preview-root"></div>
+              <p id="finish-status" class="finish-status"></p>
+            </section>
+          </div>
+
+          <div class="wizard-footer">
+            <button type="button" class="btn-outline" data-action="back">Back</button>
+            <div class="wizard-footer-actions">
+              <span id="step-footer-note" class="muted-note"></span>
+              <button type="button" id="next-btn" class="btn-dark" data-action="next">Continue</button>
+              <button type="button" id="finish-btn" class="btn-dark hidden" data-action="finish">Finish and go to dashboard</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/onboarding.js"></script>
+</body>
+</html>

@@ -118,7 +118,9 @@
     els.subtitle.textContent = 'Students see tutors · Tutors see students. Results appear only after you search.';
 
     const completeness = auth.getProfileCompleteness();
-    els.banner.textContent = 'Profile ' + completeness + '% complete — add your availability and learning goal to improve your matches.';
+    els.banner.textContent = completeness >= 100
+      ? 'Profile 100% complete — your profile is ready for search.'
+      : 'Profile ' + completeness + '% complete — finish the remaining items in your profile to improve your matches.';
 
     els.clear.addEventListener('click', clearFilters);
     els.state.addEventListener('click', handleStateClick);

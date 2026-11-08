@@ -14,13 +14,15 @@
 # ============================================================
 
 import getpass
+import json
 import os
 import re
-from datetime import timedelta
+import secrets
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, redirect, request, send_from_directory, session
 
 import db
 import mailer
@@ -75,6 +77,45 @@ FORGOT_RATE_WINDOW_SECONDS = 900
 REGISTER_RATE_LIMIT = 5
 REGISTER_RATE_WINDOW_SECONDS = 3600
 
+# Profile / onboarding vocabulary. Keep the frontend lists in sync.
+PROFILE_LEVELS = ("elementary", "high_school", "senior_high", "college", "adult")
+PROFILE_FORMATS = ("online", "in_person", "both")
+PROFILE_STATUSES = ("active", "away", "accepting", "not_accepting")
+STYLE_TAGS = (
+    "visual",
+    "step_by_step",
+    "discussion",
+    "practice",
+    "real_world",
+    "structured",
+)
+GOAL_TAGS = (
+    "exam_prep",
+    "conceptual",
+    "confidence",
+    "homework",
+    "skill_building",
+    "grades",
+)
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DAY_INDEX = {day: index + 1 for index, day in enumerate(DAYS)}
+PHOTO_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+MAX_PHOTO_BYTES = 1 * 1024 * 1024
+
+REQUIRED_FIELD_MESSAGES = {
+    "bio": "Write a short bio (at least 10 characters).",
+    "subjects": "Add at least one subject.",
+    "availability": "Add at least one availability slot.",
+    "rate": "Add your hourly rate.",
+    "budget": "Add your budget range.",
+    "format": "Choose a session format.",
+    "area": "Add your barangay.",
+}
+
 # ============================================================
 # App configuration
 # ============================================================
@@ -104,7 +145,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=_env_bool("COOKIE_SECURE", False),
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(days=REMEMBER_TIMEOUT_DAYS),
-    MAX_CONTENT_LENGTH=1 * 1024 * 1024,  # 1 MB request body limit
+    MAX_CONTENT_LENGTH=2 * 1024 * 1024,  # 2 MB (1 MB photo + form overhead)
     JSON_SORT_KEYS=False,
 )
 
@@ -205,15 +246,20 @@ def validation_error(fields, message="Please check the highlighted fields."):
     return json_error("VALIDATION_ERROR", message, 400, fields=fields)
 
 
-def public_user(user):
+def public_user(user, profile_state=None):
     """Only return fields the browser is allowed to see."""
-    return {
+    payload = {
         "id": user["id"],
         "role": user["role"],
         "name": user["name"],
         "email": user["email"],
         "emailVerified": user.get("email_verified_at") is not None,
     }
+    if profile_state is not None:
+        payload["onboardingRequired"] = profile_state["onboardingRequired"]
+        payload["profileComplete"] = profile_state["requiredComplete"]
+        payload["completeness"] = profile_state["completeness"]
+    return payload
 
 
 def fetch_user_by_email(email):
@@ -413,6 +459,445 @@ def start_session_for(user, remember=False):
 
 
 # ============================================================
+# Profile helpers
+# ============================================================
+def _json_list(value):
+    """Read a JSON list from MySQL, tolerating NULL and old rows."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _time_text(value):
+    """Convert a MySQL TIME value to HH:MM."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        total = int(value.total_seconds())
+        return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
+    return str(value)[:5]
+
+
+def _date_text(value):
+    """Convert a DATE value to YYYY-MM-DD."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _datetime_text(value):
+    """Convert a DATETIME value to an ISO string."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat() + "Z"
+    return str(value)
+
+
+def profile_row_to_dict(row, user):
+    """Normalize a profiles row into the shape used by completeness."""
+    return {
+        "id": row["id"] if row else None,
+        "userId": user["id"],
+        "role": user["role"],
+        "name": user["name"],
+        "email": user["email"],
+        "photo_url": row["photo_url"] if row else None,
+        "bio": row["bio"] if row else None,
+        "birthdate": row["birthdate"] if row else None,
+        "headline": row["headline"] if row else None,
+        "status": row["status"] if row else "active",
+        "format": row["format"] if row else None,
+        "area_barangay": row["area_barangay"] if row else None,
+        "area_city": row["area_city"] if row else "Cabadbaran City",
+        "rate_centavos": row["rate_centavos"] if row else None,
+        "budget_min_centavos": row["budget_min_centavos"] if row else None,
+        "budget_max_centavos": row["budget_max_centavos"] if row else None,
+        "currency": row["currency"] if row else "PHP",
+        "style_tags": _json_list(row["style_tags"]) if row else [],
+        "goal_tags": _json_list(row["goal_tags"]) if row else [],
+        "completeness": row["completeness"] if row else 0,
+        "onboarding_step": row["onboarding_step"] if row else 1,
+        "onboarding_completed_at": row["onboarding_completed_at"] if row else None,
+        "verified_at": row["verified_at"] if row else None,
+        "created_at": row["created_at"] if row else None,
+        "updated_at": row["updated_at"] if row else None,
+    }
+
+
+def compute_completeness(profile, subjects, availability):
+    """
+    Return (percent, required_complete, missing).
+
+    Weights follow docs/03-data-model.md. A complete but unverified
+    profile can reach 95%; verification is the final optional 5%.
+    """
+    missing = []
+    percent = 0
+
+    bio = str(profile.get("bio") or "").strip()
+    if len(bio) >= 10:
+        percent += 10
+    else:
+        missing.append({
+            "field": "bio",
+            "label": "Write a short bio (at least 10 characters)",
+            "weight": 10,
+        })
+
+    if profile.get("photo_url"):
+        percent += 5
+    else:
+        missing.append({
+            "field": "photoUrl",
+            "label": "Add a profile photo (optional)",
+            "weight": 5,
+        })
+
+    if subjects:
+        percent += 20
+    else:
+        missing.append({
+            "field": "subjects",
+            "label": "Add at least one subject",
+            "weight": 20,
+        })
+
+    if profile.get("goal_tags"):
+        percent += 10
+    else:
+        missing.append({
+            "field": "goalTags",
+            "label": "Choose a learning goal",
+            "weight": 10,
+        })
+
+    if profile.get("style_tags"):
+        percent += 5
+    else:
+        missing.append({
+            "field": "styleTags",
+            "label": "Choose a teaching or learning style",
+            "weight": 5,
+        })
+
+    if availability:
+        percent += 20
+    else:
+        missing.append({
+            "field": "availability",
+            "label": "Add at least one availability slot",
+            "weight": 20,
+        })
+
+    if profile.get("role") == "tutor":
+        has_price = profile.get("rate_centavos") is not None
+        price_field = "rate"
+        price_label = "Add your hourly rate"
+    else:
+        has_price = (
+            profile.get("budget_min_centavos") is not None
+            and profile.get("budget_max_centavos") is not None
+        )
+        price_field = "budget"
+        price_label = "Add your budget range"
+
+    if has_price:
+        percent += 10
+    else:
+        missing.append({
+            "field": price_field,
+            "label": price_label,
+            "weight": 10,
+        })
+
+    if profile.get("format"):
+        percent += 5
+    else:
+        missing.append({
+            "field": "format",
+            "label": "Choose a session format",
+            "weight": 5,
+        })
+
+    if str(profile.get("area_barangay") or "").strip():
+        percent += 10
+    else:
+        missing.append({
+            "field": "area",
+            "label": "Add your barangay",
+            "weight": 10,
+        })
+
+    if profile.get("verified_at"):
+        percent += 5
+    else:
+        missing.append({
+            "field": "verification",
+            "label": "Verify your tutor profile (optional)",
+            "weight": 5,
+        })
+
+    required_complete = bool(
+        len(bio) >= 10
+        and subjects
+        and availability
+        and has_price
+        and profile.get("format")
+        and str(profile.get("area_barangay") or "").strip()
+    )
+    return min(100, percent), required_complete, missing
+
+
+def get_profile_payload(user_id):
+    """Return the private profile shape used by onboarding and the dashboard."""
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return None
+
+    row = db.query_one("SELECT * FROM profiles WHERE user_id = %s", (user_id,))
+    subjects = []
+    availability = []
+    if row:
+        subjects = db.query_all(
+            """
+            SELECT ps.subject_id, ps.level, ps.kind, s.name, s.category
+            FROM profile_subjects ps
+            JOIN subjects s ON s.id = ps.subject_id
+            WHERE ps.profile_id = %s
+            ORDER BY s.category, s.name
+            """,
+            (row["id"],),
+        )
+        availability = db.query_all(
+            """
+            SELECT day_of_week, start_time, end_time, timezone
+            FROM availability_slots
+            WHERE profile_id = %s
+            ORDER BY day_of_week, start_time
+            """,
+            (row["id"],),
+        )
+
+    profile = profile_row_to_dict(row, user)
+    percent, required_complete, missing = compute_completeness(
+        profile,
+        subjects,
+        availability,
+    )
+
+    return {
+        "id": profile["id"],
+        "userId": user["id"],
+        "role": user["role"],
+        "name": user["name"],
+        "email": user["email"],
+        "photoUrl": profile["photo_url"],
+        "bio": profile["bio"],
+        "birthdate": _date_text(profile["birthdate"]),
+        "headline": profile["headline"],
+        "status": profile["status"],
+        "format": profile["format"],
+        "area": {
+            "barangay": profile["area_barangay"],
+            "city": profile["area_city"],
+        },
+        "subjects": [
+            {
+                "id": subject["subject_id"],
+                "name": subject["name"],
+                "level": subject["level"],
+                "kind": subject["kind"],
+            }
+            for subject in subjects
+        ],
+        "styleTags": profile["style_tags"],
+        "goalTags": profile["goal_tags"],
+        "rateCentavos": profile["rate_centavos"],
+        "budgetMinCentavos": profile["budget_min_centavos"],
+        "budgetMaxCentavos": profile["budget_max_centavos"],
+        "currency": profile["currency"],
+        "availability": [
+            {
+                "day": DAYS[slot["day_of_week"] - 1],
+                "start": _time_text(slot["start_time"]),
+                "end": _time_text(slot["end_time"]),
+            }
+            for slot in availability
+            if 1 <= slot["day_of_week"] <= 7
+        ],
+        "completeness": percent,
+        "requiredComplete": required_complete,
+        "missing": missing,
+        "onboardingStep": profile["onboarding_step"],
+        "onboardingCompleted": profile["onboarding_completed_at"] is not None,
+        "verified": profile["verified_at"] is not None,
+        "createdAt": _datetime_text(profile["created_at"]),
+        "updatedAt": _datetime_text(profile["updated_at"]),
+    }
+
+
+def get_onboarding_state(user_id):
+    """Small state object used by auth responses and page redirects."""
+    profile = get_profile_payload(user_id)
+    if not profile:
+        return {
+            "onboardingRequired": True,
+            "requiredComplete": False,
+            "onboardingCompleted": False,
+            "completeness": 0,
+        }
+    return {
+        "onboardingRequired": (
+            not profile["requiredComplete"]
+            or not profile["onboardingCompleted"]
+        ),
+        "requiredComplete": profile["requiredComplete"],
+        "onboardingCompleted": profile["onboardingCompleted"],
+        "completeness": profile["completeness"],
+    }
+
+
+def parse_money(value, field, fields):
+    """Parse centavos from an integer. Empty values clear the field."""
+    if value is None or value == "":
+        return None
+    try:
+        amount = int(value)
+    except (TypeError, ValueError):
+        fields[field] = "Enter a whole number."
+        return None
+    if amount < 0 or amount > 1000000:
+        fields[field] = "Enter an amount between 0 and 10,000 PHP."
+        return None
+    return amount
+
+
+def parse_tags(value, allowed, field, fields):
+    """Validate a small multi-select list."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        fields[field] = "Choose valid options."
+        return []
+    result = []
+    for item in value:
+        tag = str(item or "").strip()
+        if tag not in allowed:
+            fields[field] = "Choose valid options."
+            return []
+        if tag not in result:
+            result.append(tag)
+    if len(result) > 6:
+        fields[field] = "Choose up to 6 options."
+        return []
+    return result
+
+
+def parse_subjects(value, role, fields):
+    """Validate subject ids and levels, then attach teach/need."""
+    if not isinstance(value, list):
+        fields["subjects"] = "Choose at least one subject."
+        return []
+    if len(value) > 8:
+        fields["subjects"] = "Choose up to 8 subjects."
+        return []
+
+    valid_ids = {
+        row["id"] for row in db.query_all("SELECT id FROM subjects")
+    }
+    result = []
+    seen = set()
+    kind = "teach" if role == "tutor" else "need"
+
+    for item in value:
+        if not isinstance(item, dict):
+            fields["subjects"] = "Choose valid subjects."
+            return []
+        subject_id = str(item.get("id") or "").strip()
+        level = str(item.get("level") or "").strip()
+        if subject_id not in valid_ids:
+            fields["subjects"] = "Choose a valid subject."
+            return []
+        if level not in PROFILE_LEVELS:
+            fields["subjects"] = "Choose a level for each subject."
+            return []
+        key = (subject_id, level)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            "id": subject_id,
+            "level": level,
+            "kind": kind,
+        })
+    return result
+
+
+def parse_availability(value, fields):
+    """Validate weekly availability in the API's day/start/end shape."""
+    if not isinstance(value, list):
+        fields["availability"] = "Add at least one availability slot."
+        return []
+    if len(value) > 21:
+        fields["availability"] = "Choose up to 21 slots."
+        return []
+
+    result = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            fields["availability"] = "Choose valid availability slots."
+            return []
+        day = str(item.get("day") or "").strip().lower()
+        start = str(item.get("start") or "").strip()
+        end = str(item.get("end") or "").strip()
+        if day not in DAY_INDEX:
+            fields["availability"] = "Choose a valid day."
+            return []
+        try:
+            start_time = datetime.strptime(start, "%H:%M").time()
+            end_time = datetime.strptime(end, "%H:%M").time()
+        except ValueError:
+            fields["availability"] = "Choose valid start and end times."
+            return []
+        if start_time >= end_time:
+            fields["availability"] = "End time must be after start time."
+            return []
+        key = (day, start, end)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            "day": day,
+            "start": start,
+            "end": end,
+        })
+    return result
+
+
+def looks_like_image(data, mime):
+    """Check magic bytes instead of trusting the browser's MIME type."""
+    if mime == "image/jpeg":
+        return data[:3] == b"\xff\xd8\xff"
+    if mime == "image/png":
+        return data[:8] == b"\x89PNG\r\n\x1a\n"
+    if mime == "image/webp":
+        return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    return False
+
+
+# ============================================================
 # Frontend files
 # ============================================================
 @app.get("/")
@@ -435,13 +920,32 @@ def script():
 @app.get("/dashboard.html")
 @login_required
 def dashboard_page():
-    """The dashboard shell is only served to a logged-in session."""
+    """The dashboard is only served after onboarding is finished."""
+    state = get_onboarding_state(session["user_id"])
+    if not state["onboardingCompleted"]:
+        return redirect("/onboarding")
     return send_from_directory(str(BASE_DIR), "dashboard.html")
+
+
+@app.get("/onboarding")
+@app.get("/onboarding.html")
+@login_required
+def onboarding_page():
+    """Serve the profile wizard. Completed users can edit with ?edit=1."""
+    state = get_onboarding_state(session["user_id"])
+    if state["onboardingCompleted"] and not request.args.get("edit"):
+        return redirect("/dashboard.html#search")
+    return send_from_directory(str(BASE_DIR), "onboarding.html")
 
 
 @app.get("/dashboard.css")
 def dashboard_styles():
     return send_from_directory(str(BASE_DIR), "dashboard.css")
+
+
+@app.get("/onboarding.css")
+def onboarding_styles():
+    return send_from_directory(str(BASE_DIR), "onboarding.css")
 
 
 @app.get("/js/<path:filename>")
@@ -454,6 +958,12 @@ def js_files(filename):
 def video_files(filename):
     """Serve local videos such as the TutorMatch intro."""
     return send_from_directory(str(BASE_DIR / "videos"), filename)
+
+
+@app.get("/uploads/<path:filename>")
+def uploaded_files(filename):
+    """Serve uploaded profile photos from the local uploads folder."""
+    return send_from_directory(str(BASE_DIR / "uploads"), filename)
 
 
 # ============================================================
@@ -499,14 +1009,10 @@ def auth_me():
         clear_user_session()
         return json_error("UNAUTHORIZED", "Please log in again.", 401)
 
+    state = get_onboarding_state(user["id"])
     return jsonify({
-        "user": {
-            "id": user["id"],
-            "role": user["role"],
-            "name": user["name"],
-            "email": user["email"],
-            "emailVerified": user["email_verified_at"] is not None,
-        }
+        "user": public_user(user, state),
+        "onboardingRequired": state["onboardingRequired"],
     })
 
 
@@ -678,7 +1184,11 @@ def auth_login():
     start_session_for(user, remember)
     log_event("login_success", user_id=user["id"], email_tried=email)
 
-    return jsonify({"user": public_user(user)})
+    state = get_onboarding_state(user["id"])
+    return jsonify({
+        "user": public_user(user, state),
+        "onboardingRequired": state["onboardingRequired"],
+    })
 
 
 @app.post("/api/auth/verify-email")
@@ -807,7 +1317,11 @@ def auth_verify_email():
     start_session_for(user, False)
     log_event("email_verified", user_id=user["id"], email_tried=email)
 
-    return jsonify({"user": public_user(user)})
+    state = get_onboarding_state(user["id"])
+    return jsonify({
+        "user": public_user(user, state),
+        "onboardingRequired": state["onboardingRequired"],
+    })
 
 
 @app.post("/api/auth/resend-otp")
@@ -1008,6 +1522,439 @@ def auth_logout():
     if user_id:
         log_event("logout", user_id=user_id)
     return "", 204
+
+
+# ============================================================
+# Profile and onboarding API
+# ============================================================
+@app.get("/api/subjects")
+def subjects_list():
+    """Reference subjects used by onboarding and later by search."""
+    q = (request.args.get("q") or "").strip()
+    if q:
+        rows = db.query_all(
+            """
+            SELECT id, name, category
+            FROM subjects
+            WHERE name LIKE %s OR category LIKE %s
+            ORDER BY category, name
+            """,
+            (f"%{q}%", f"%{q}%"),
+        )
+    else:
+        rows = db.query_all(
+            "SELECT id, name, category FROM subjects ORDER BY category, name"
+        )
+    return jsonify({"subjects": rows})
+
+
+@app.get("/api/levels")
+def levels_list():
+    """Level labels shared by the onboarding UI."""
+    return jsonify({
+        "levels": [
+            {"id": "elementary", "label": "Elementary"},
+            {"id": "high_school", "label": "High school"},
+            {"id": "senior_high", "label": "Senior high"},
+            {"id": "college", "label": "College"},
+            {"id": "adult", "label": "Adult learner"},
+        ]
+    })
+
+
+@app.get("/api/me/profile")
+@login_required
+def my_profile():
+    """Return the private, editable profile."""
+    payload = get_profile_payload(session["user_id"])
+    if not payload:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+    return jsonify({"profile": payload})
+
+
+@app.get("/api/me/completeness")
+@login_required
+def my_completeness():
+    """Return the completeness meter and the missing checklist."""
+    payload = get_profile_payload(session["user_id"])
+    if not payload:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+    return jsonify({
+        "percent": payload["completeness"],
+        "requiredComplete": payload["requiredComplete"],
+        "missing": payload["missing"],
+    })
+
+
+@app.patch("/api/me/profile")
+@login_required
+def update_my_profile():
+    """Save any subset of profile fields and recompute completeness."""
+    user_id = session["user_id"]
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+
+    data = json_body()
+    row = db.query_one("SELECT * FROM profiles WHERE user_id = %s", (user_id,))
+    current_subjects = []
+    current_availability = []
+    if row:
+        current_subjects = db.query_all(
+            """
+            SELECT subject_id, level, kind
+            FROM profile_subjects
+            WHERE profile_id = %s
+            """,
+            (row["id"],),
+        )
+        current_availability = db.query_all(
+            """
+            SELECT day_of_week, start_time, end_time
+            FROM availability_slots
+            WHERE profile_id = %s
+            """,
+            (row["id"],),
+        )
+
+    profile = profile_row_to_dict(row, user)
+    fields = {}
+    name_update = None
+
+    if "name" in data:
+        name = clean_name(data.get("name"))
+        if not name:
+            fields["name"] = "Enter your full name (2-80 characters)."
+        else:
+            profile["name"] = name
+            name_update = name
+
+    if "headline" in data:
+        headline = str(data.get("headline") or "").strip()
+        if len(headline) > 120:
+            fields["headline"] = "Keep the headline under 120 characters."
+        else:
+            profile["headline"] = headline or None
+
+    if "bio" in data:
+        bio = str(data.get("bio") or "").strip()
+        if len(bio) > 600:
+            fields["bio"] = "Keep the bio under 600 characters."
+        else:
+            profile["bio"] = bio or None
+
+    if "birthdate" in data:
+        value = str(data.get("birthdate") or "").strip()
+        if not value:
+            profile["birthdate"] = None
+        else:
+            try:
+                birthdate = date.fromisoformat(value)
+            except ValueError:
+                fields["birthdate"] = "Use a valid date."
+            else:
+                if birthdate > date.today():
+                    fields["birthdate"] = "Birthdate cannot be in the future."
+                else:
+                    profile["birthdate"] = birthdate
+
+    if "status" in data:
+        status = str(data.get("status") or "").strip()
+        if status not in PROFILE_STATUSES:
+            fields["status"] = "Choose a valid status."
+        else:
+            profile["status"] = status
+
+    if "format" in data:
+        fmt = str(data.get("format") or "").strip()
+        if fmt not in PROFILE_FORMATS:
+            fields["format"] = "Choose a session format."
+        else:
+            profile["format"] = fmt
+
+    if "area" in data:
+        area = data.get("area")
+        if not isinstance(area, dict):
+            fields["area"] = "Enter your barangay and city."
+        else:
+            barangay = str(area.get("barangay") or "").strip()
+            city = str(area.get("city") or "Cabadbaran City").strip()
+            if len(barangay) > 80:
+                fields["area"] = "Keep the barangay under 80 characters."
+            elif len(city) > 80:
+                fields["area"] = "Keep the city under 80 characters."
+            else:
+                profile["area_barangay"] = barangay or None
+                profile["area_city"] = city or "Cabadbaran City"
+
+    if "rateCentavos" in data:
+        profile["rate_centavos"] = parse_money(
+            data.get("rateCentavos"),
+            "rate",
+            fields,
+        )
+    if "budgetMinCentavos" in data:
+        profile["budget_min_centavos"] = parse_money(
+            data.get("budgetMinCentavos"),
+            "budget",
+            fields,
+        )
+    if "budgetMaxCentavos" in data:
+        profile["budget_max_centavos"] = parse_money(
+            data.get("budgetMaxCentavos"),
+            "budget",
+            fields,
+        )
+
+    if (
+        profile["budget_min_centavos"] is not None
+        and profile["budget_max_centavos"] is not None
+        and profile["budget_min_centavos"] > profile["budget_max_centavos"]
+    ):
+        fields["budget"] = "The minimum budget cannot be higher than the maximum."
+
+    if "styleTags" in data:
+        profile["style_tags"] = parse_tags(
+            data.get("styleTags"),
+            STYLE_TAGS,
+            "styleTags",
+            fields,
+        )
+    if "goalTags" in data:
+        profile["goal_tags"] = parse_tags(
+            data.get("goalTags"),
+            GOAL_TAGS,
+            "goalTags",
+            fields,
+        )
+
+    subjects_provided = "subjects" in data
+    if subjects_provided:
+        parsed_subjects = parse_subjects(
+            data.get("subjects"),
+            user["role"],
+            fields,
+        )
+        profile["subjects_for_write"] = parsed_subjects
+    else:
+        profile["subjects_for_write"] = current_subjects
+
+    availability_provided = "availability" in data
+    if availability_provided:
+        parsed_availability = parse_availability(
+            data.get("availability"),
+            fields,
+        )
+        profile["availability_for_write"] = parsed_availability
+    else:
+        profile["availability_for_write"] = current_availability
+
+    if "onboardingStep" in data:
+        try:
+            step = int(data.get("onboardingStep"))
+        except (TypeError, ValueError):
+            fields["onboardingStep"] = "Choose a valid step."
+        else:
+            if step < 1 or step > 7:
+                fields["onboardingStep"] = "Choose a valid step."
+            else:
+                profile["onboarding_step"] = step
+
+    finish = bool(data.get("onboardingCompleted"))
+    if fields:
+        return validation_error(fields)
+
+    percent, required_complete, missing = compute_completeness(
+        profile,
+        profile["subjects_for_write"],
+        profile["availability_for_write"],
+    )
+
+    if finish and not required_complete:
+        finish_fields = {}
+        for item in missing:
+            if item["field"] in REQUIRED_FIELD_MESSAGES:
+                finish_fields[item["field"]] = REQUIRED_FIELD_MESSAGES[item["field"]]
+        return validation_error(
+            finish_fields or {"profile": "Complete the required profile fields."},
+            "Complete the required profile fields before finishing.",
+        )
+
+    completed_at = profile.get("onboarding_completed_at")
+    if finish:
+        completed_at = now_utc()
+        profile["onboarding_step"] = 7
+    elif not required_complete:
+        completed_at = None
+
+    style_json = json.dumps(profile["style_tags"])
+    goal_json = json.dumps(profile["goal_tags"])
+    # The upload route owns photo_url. Keeping it out of this write
+    # prevents a save from overwriting a photo that finished uploading.
+    profile_values = (
+        profile["bio"],
+        profile["birthdate"],
+        profile["headline"],
+        profile["status"],
+        profile["format"],
+        profile["area_barangay"],
+        profile["area_city"],
+        profile["rate_centavos"],
+        profile["budget_min_centavos"],
+        profile["budget_max_centavos"],
+        profile["currency"],
+        style_json,
+        goal_json,
+        percent,
+        profile["onboarding_step"],
+        completed_at,
+    )
+
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            if row:
+                profile_id = row["id"]
+                cursor.execute(
+                    """
+                    UPDATE profiles
+                    SET bio=%s, birthdate=%s, headline=%s,
+                        status=%s, format=%s, area_barangay=%s, area_city=%s,
+                        rate_centavos=%s, budget_min_centavos=%s,
+                        budget_max_centavos=%s, currency=%s, style_tags=%s,
+                        goal_tags=%s, completeness=%s, onboarding_step=%s,
+                        onboarding_completed_at=%s
+                    WHERE id=%s
+                    """,
+                    profile_values + (profile_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO profiles
+                        (bio, birthdate, headline, status, format,
+                         area_barangay, area_city, rate_centavos,
+                         budget_min_centavos, budget_max_centavos, currency,
+                         style_tags, goal_tags, completeness, onboarding_step,
+                         onboarding_completed_at, user_id)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    profile_values + (user_id,),
+                )
+                profile_id = cursor.lastrowid
+
+            if subjects_provided:
+                cursor.execute(
+                    "DELETE FROM profile_subjects WHERE profile_id = %s",
+                    (profile_id,),
+                )
+                for subject in profile["subjects_for_write"]:
+                    cursor.execute(
+                        """
+                        INSERT INTO profile_subjects
+                            (profile_id, subject_id, level, kind)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (
+                            profile_id,
+                            subject["id"],
+                            subject["level"],
+                            subject["kind"],
+                        ),
+                    )
+
+            if availability_provided:
+                cursor.execute(
+                    "DELETE FROM availability_slots WHERE profile_id = %s",
+                    (profile_id,),
+                )
+                for slot in profile["availability_for_write"]:
+                    cursor.execute(
+                        """
+                        INSERT INTO availability_slots
+                            (profile_id, day_of_week, start_time, end_time, timezone)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            profile_id,
+                            DAY_INDEX[slot["day"]],
+                            slot["start"],
+                            slot["end"],
+                            "Asia/Manila",
+                        ),
+                    )
+
+            if name_update:
+                cursor.execute(
+                    "UPDATE users SET name = %s WHERE id = %s",
+                    (name_update, user_id),
+                )
+
+    log_event(
+        "profile_saved",
+        user_id=user_id,
+        details=f"step {profile['onboarding_step']}, complete={required_complete}",
+    )
+    payload = get_profile_payload(user_id)
+    return jsonify({"profile": payload})
+
+
+@app.post("/api/me/photo")
+@login_required
+def upload_my_photo():
+    """Store an optional profile photo in uploads/avatars."""
+    photo = request.files.get("photo")
+    if not photo or not photo.filename:
+        return validation_error({"photo": "Choose an image file."})
+
+    mime = (photo.mimetype or "").lower()
+    if mime not in PHOTO_TYPES:
+        return validation_error({"photo": "Use a JPG, PNG, or WebP image."})
+
+    data = photo.read(MAX_PHOTO_BYTES + 1)
+    if not data or len(data) > MAX_PHOTO_BYTES:
+        return validation_error({"photo": "Keep the image under 1 MB."})
+    if not looks_like_image(data, mime):
+        return validation_error({"photo": "That file is not a valid image."})
+
+    extension = PHOTO_TYPES[mime]
+    filename = f"{session['user_id']}-{secrets.token_hex(6)}.{extension}"
+    avatar_dir = BASE_DIR / "uploads" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    (avatar_dir / filename).write_bytes(data)
+    photo_url = f"/uploads/avatars/{filename}"
+
+    old_photo = None
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, photo_url FROM profiles WHERE user_id = %s",
+                (session["user_id"],),
+            )
+            row = cursor.fetchone()
+            if row:
+                old_photo = row["photo_url"]
+                cursor.execute(
+                    "UPDATE profiles SET photo_url = %s WHERE id = %s",
+                    (photo_url, row["id"]),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO profiles (user_id, photo_url)
+                    VALUES (%s, %s)
+                    """,
+                    (session["user_id"], photo_url),
+                )
+
+    if old_photo and old_photo.startswith("/uploads/avatars/"):
+        old_path = BASE_DIR / old_photo.lstrip("/")
+        try:
+            old_path.unlink()
+        except OSError:
+            pass
+
+    log_event("profile_photo_updated", user_id=session["user_id"])
+    return jsonify({"photoUrl": photo_url}), 201
 
 
 # ============================================================

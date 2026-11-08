@@ -606,12 +606,14 @@
 
     setBusy(loginForm, true);
     try {
-      await auth.login({
+      const result = await auth.login({
         email,
         password,
         remember: $('#login-remember').checked
       });
-      window.location.href = 'dashboard.html#search';
+      window.location.href = result && result.onboardingRequired
+        ? 'onboarding.html'
+        : 'dashboard.html#search';
     } catch (err) {
       if (err.code === 'EMAIL_NOT_VERIFIED') {
         openVerify(
@@ -691,8 +693,10 @@
 
     setBusy(verifyForm, true);
     try {
-      await auth.verifyEmail({ email, otp });
-      window.location.href = 'dashboard.html#search';
+      const result = await auth.verifyEmail({ email, otp });
+      window.location.href = result && result.onboardingRequired
+        ? 'onboarding.html'
+        : 'dashboard.html#search';
     } catch (err) {
       if (err.code === 'ALREADY_VERIFIED') {
         setTab('login', { focus: false });

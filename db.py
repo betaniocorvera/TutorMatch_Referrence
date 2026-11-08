@@ -9,6 +9,7 @@
 # ============================================================
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import pymysql
@@ -68,6 +69,27 @@ def execute(sql, params=()):
             cursor.execute(sql, params)
             connection.commit()
             return cursor.lastrowid
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+@contextmanager
+def transaction():
+    """
+    Group several statements into one transaction.
+
+    Usage:
+        with db.transaction() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(...)
+    """
+    connection = get_connection()
+    try:
+        yield connection
+        connection.commit()
     except Exception:
         connection.rollback()
         raise

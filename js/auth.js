@@ -7,11 +7,11 @@
   'use strict';
 
   const SENT_KEY = 'tutormatch_sent_requests';
-  const PROFILE_KEY = 'tutormatch_profile_completeness';
   const LEGACY_USER_KEY = 'tutormatch_users';
   const LEGACY_SESSION_KEY = 'tutormatch_session';
 
   let currentUser = null;
+  let profileCache = null;
   let csrfToken = '';
   let csrfPromise = null;
 
@@ -59,7 +59,11 @@
   }
 
   function setSessionUser(user) {
-    currentUser = normalizeUser(user);
+    const nextUser = normalizeUser(user);
+    if (!currentUser || !nextUser || currentUser.id !== nextUser.id) {
+      profileCache = null;
+    }
+    currentUser = nextUser;
     return currentUser;
   }
 
@@ -69,6 +73,7 @@
 
   function clearSession() {
     currentUser = null;
+    profileCache = null;
   }
 
   function invalidateCsrf() {
@@ -176,13 +181,109 @@
     }
   }
 
-  async function requireSession() {
+  async function requireSession(options = {}) {
     const user = await fetchMe();
     if (!user) {
       global.location.replace('index.html?login=1');
       return null;
     }
+
+    if (!options.allowIncomplete) {
+      if (user.onboardingRequired) {
+        global.location.replace('onboarding.html');
+        return null;
+      }
+      try {
+        await fetchProfile(true);
+      } catch {
+        /* The profile card can retry; the dashboard route already
+           checks onboarding completion on the server. */
+      }
+    }
     return user;
+  }
+
+  async function fetchProfile(force = false) {
+    if (profileCache && !force) return profileCache;
+    const data = await apiFetch('/api/me/profile');
+    profileCache = (data && data.profile) || null;
+    return profileCache;
+  }
+
+  function getProfile() {
+    return profileCache;
+  }
+
+  async function updateProfile(updates) {
+    const data = await apiFetch('/api/me/profile', {
+      method: 'PATCH',
+      body: updates
+    });
+    profileCache = (data && data.profile) || null;
+    return profileCache;
+  }
+
+  async function uploadPhoto(file) {
+    async function send(canRetry) {
+      const form = new FormData();
+      form.append('photo', file);
+      const headers = {
+        Accept: 'application/json',
+        'X-CSRFToken': await ensureCsrf()
+      };
+
+      let response;
+      try {
+        response = await fetch('/api/me/photo', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers,
+          body: form
+        });
+      } catch {
+        throw new ApiError('Cannot reach the server. Start the Flask app.', {
+          code: 'SERVER_UNAVAILABLE'
+        });
+      }
+
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        const error = (data && data.error) || {};
+        if (response.status === 400 && error.code === 'CSRF_ERROR' && canRetry) {
+          invalidateCsrf();
+          await ensureCsrf(true);
+          return send(false);
+        }
+        throw new ApiError(error.message || 'Could not upload the photo.', {
+          code: error.code,
+          status: response.status,
+          fields: error.fields
+        });
+      }
+
+      if (profileCache && data) {
+        profileCache.photoUrl = data.photoUrl;
+      }
+      return data;
+    }
+
+    return send(true);
+  }
+
+  async function getSubjects() {
+    const data = await apiFetch('/api/subjects');
+    return (data && data.subjects) || [];
+  }
+
+  async function getLevels() {
+    const data = await apiFetch('/api/levels');
+    return (data && data.levels) || [];
   }
 
   async function login({ email, password, remember }) {
@@ -234,6 +335,7 @@
   async function logout(options = {}) {
     await apiFetch('/api/auth/logout', { method: 'POST' });
     currentUser = null;
+    profileCache = null;
     if (options.redirect !== false) {
       global.location.href = 'index.html';
     }
@@ -266,13 +368,15 @@
   }
 
   function getProfileCompleteness() {
-    const value = Number(localStorage.getItem(PROFILE_KEY));
-    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 65;
+    if (profileCache && Number.isFinite(Number(profileCache.completeness))) {
+      return Math.max(0, Math.min(100, Number(profileCache.completeness)));
+    }
+    return 0;
   }
 
   function setProfileCompleteness(value) {
     const n = Math.max(0, Math.min(100, Number(value) || 0));
-    localStorage.setItem(PROFILE_KEY, String(n));
+    if (profileCache) profileCache.completeness = n;
     return n;
   }
 
@@ -283,6 +387,12 @@
     invalidateCsrf,
     fetchMe,
     requireSession,
+    fetchProfile,
+    getProfile,
+    updateProfile,
+    uploadPhoto,
+    getSubjects,
+    getLevels,
     getSession,
     setSessionUser,
     saveSession,

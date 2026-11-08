@@ -167,7 +167,7 @@
 
           <div class="info-banner" role="status">
             <i data-lucide="info"></i>
-            <p id="profile-banner">Profile 65% complete — add your availability and learning goal to improve your matches.</p>
+            <p id="profile-banner">Loading your profile completeness…</p>
           </div>
 
           <div id="results-meta" class="results-meta" hidden></div>
@@ -176,32 +176,64 @@
 
         <!-- ============ PROFILE ============ -->
         <section id="section-profile" class="app-section hidden" data-section="profile" aria-labelledby="profile-title">
-          <div class="page-head">
-            <h1 id="profile-title">Profile</h1>
-            <p>How your TutorMatch profile looks and how complete it is.</p>
+          <div class="page-head profile-head">
+            <div>
+              <h1 id="profile-title">Profile</h1>
+              <p>How your TutorMatch profile looks and how complete it is.</p>
+            </div>
+            <a href="onboarding.html?edit=1" class="btn-dark-sm" id="edit-profile-btn">
+              <i data-lucide="pencil" class="h-3.5 w-3.5"></i>
+              Edit profile
+            </a>
           </div>
 
           <div class="panel-card">
             <div class="profile-summary">
               <div id="profile-page-avatar" class="avatar-lg" aria-hidden="true">S</div>
-              <div>
+              <div class="min-w-0">
                 <h2 id="profile-page-name">Student Name</h2>
                 <p id="profile-page-role">Student</p>
                 <p id="profile-page-email"></p>
+                <p id="profile-page-headline" class="profile-headline"></p>
               </div>
             </div>
 
             <div class="completeness">
               <div class="completeness-head">
                 <span>Profile completeness</span>
-                <span id="profile-page-percent">65%</span>
+                <span id="profile-page-percent">0%</span>
               </div>
-              <div class="completeness-track" role="progressbar" aria-label="Profile completeness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65">
-                <div id="profile-page-fill" class="completeness-fill" style="width:65%"></div>
+              <div class="completeness-track" role="progressbar" aria-label="Profile completeness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div id="profile-page-fill" class="completeness-fill" style="width:0%"></div>
               </div>
             </div>
 
-            <p class="muted-note">Profile editing will be added in the next phase. The completeness value feeds the Search banner.</p>
+            <div class="profile-details">
+              <div class="profile-detail profile-detail-wide">
+                <span>Bio</span>
+                <p id="profile-page-bio"></p>
+              </div>
+              <div class="profile-detail profile-detail-wide">
+                <span>Subjects</span>
+                <div id="profile-page-subjects" class="profile-chip-list"></div>
+              </div>
+              <div class="profile-detail profile-detail-wide">
+                <span>Availability</span>
+                <div id="profile-page-availability" class="profile-availability"></div>
+              </div>
+              <div class="profile-detail">
+                <span id="profile-page-price-label">Rate</span>
+                <p id="profile-page-price"></p>
+              </div>
+              <div class="profile-detail">
+                <span>Format</span>
+                <p id="profile-page-format"></p>
+              </div>
+              <div class="profile-detail">
+                <span>Area</span>
+                <p id="profile-page-area"></p>
+              </div>
+            </div>
           </div>
         </section>
 

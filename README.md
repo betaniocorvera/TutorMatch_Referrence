@@ -20,7 +20,7 @@ py -m pip install -r requirements.txt
 mysql -u root -p -e "source schema.sql"
 ```
 
-The schema creates the `tutormatch` database and the `users`, `email_otps`, `password_resets`, and `security_events` tables.
+The schema creates the `tutormatch` database and the `users`, `email_otps`, `password_resets`, `security_events`, `profiles`, `subjects`, `profile_subjects`, and `availability_slots` tables. It also seeds the reference subject list.
 
 ### 3. Configure `.env`
 
@@ -67,21 +67,58 @@ py -m flask --app app create-admin
 
 In development, read the latest OTP or reset link from the Flask terminal or `outbox.log`. The API never returns OTPs or reset tokens.
 
+## Onboarding and profile persistence
+
+After login or email verification, the API returns `onboardingRequired`. The landing page sends new or incomplete profiles to `/onboarding`; completed profiles go to the dashboard.
+
+The wizard has seven steps:
+
+1. Basics — photo (optional), display name, headline, bio, birthdate (private), status.
+2. Subjects and levels — at least one subject, each with a level.
+3. Goals and style — recommended, not required.
+4. Availability — at least one weekly slot from the morning, afternoon, or evening grid.
+5. Rate or budget and format — required.
+6. Area — barangay and city only; no exact address.
+7. Preview — review the public card, then finish.
+
+Profiles save to MySQL after each step and on text changes (debounced). `Save & exit` stores your progress; the next visit resumes at the furthest saved step. Required fields cannot be skipped, and the completeness meter updates live.
+
+Minimum profile for search: a bio of at least 10 characters, one subject, one availability slot, a rate (tutor) or budget range (student), a format, and a barangay. The server redirects incomplete profiles from `/dashboard.html` back to `/onboarding`. Completed profiles can edit from the dashboard with `/onboarding?edit=1`.
+
+Photos are optional, limited to 1 MB, validated by magic bytes (JPG, PNG, WebP), and stored in `uploads/avatars/`. They are served from `/uploads/...`.
+
+### Profile API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/subjects` | Reference subjects, optionally filtered with `?q=`. |
+| `GET` | `/api/levels` | Level labels. |
+| `GET` | `/api/me/profile` | Private profile, subjects, availability, completeness. |
+| `PATCH` | `/api/me/profile` | Save any subset of profile fields; recompute completeness. |
+| `GET` | `/api/me/completeness` | Percentage, required-complete flag, missing checklist. |
+| `POST` | `/api/me/photo` | Upload a profile photo as multipart form data. |
+
+Profile writes use `db.transaction()` so the profile row, subjects, availability, and display name stay in sync.
+
 ## Files
 - `index.html` - landing page, auth modal (login, register, verify, reset)
 - `styles.css` - animations and form styling
 - `script.js` - landing interactions and API-backed auth flows
 - `dashboard.html` - authenticated search dashboard shell
 - `dashboard.css` - dashboard and responsive styles
-- `js/auth.js` - shared API client, CSRF handling, session validation
+- `onboarding.html` - seven-step profile wizard
+- `onboarding.css` - onboarding-specific styles
+- `js/onboarding.js` - wizard state, autosave, validation, preview
+- `js/auth.js` - shared API client, CSRF handling, session validation, profile methods
 - `js/dashboard.js` - async session guard, sidebar, hash routing, logout
 - `js/data.js` - mock users, hard filters, and placeholder match scoring
 - `js/search.js`, `js/profile.js`, `js/messages.js` - dashboard sections
-- `app.py` - Flask app, auth routes, static routes, security headers
+- `app.py` - Flask app, auth/onboarding/profile routes, static routes, security headers
 - `security.py` - validation, hashing, OTP/reset helpers, CSRF, sessions, rate limits
 - `db.py` - MySQL helpers
 - `mailer.py` - dev outbox / SMTP email helpers
 - `schema.sql` - MySQL schema
+- `uploads/avatars/` - optional profile photos (local, git-ignored)
 - `docs/` - Phase 1 product, API, and data documentation
 - `mock/seed.json` - fictional demo data for UI development
 
@@ -93,4 +130,4 @@ In development, read the latest OTP or reset link from the Flask terminal or `ou
 - [Mock seed data](mock/seed.json)
 
 ## Status
-The landing page, registration/login/verification/reset flow, secure sessions, and authenticated dashboard shell are wired. Search results and sent requests are still demo data stored in the browser; KNN matching and a persistent requests/messages backend are next.
+The landing page, registration/login/verification/reset flow, secure sessions, onboarding/profile persistence, and authenticated dashboard shell are wired. Search results and sent requests are still demo data stored in the browser; KNN matching and a persistent requests/messages backend are next.

@@ -4,6 +4,12 @@
 # Local email preview
 outbox.log
 
+# Uploaded profile photos
+uploads/*
+!uploads/.gitkeep
+!uploads/avatars/
+!uploads/avatars/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]
