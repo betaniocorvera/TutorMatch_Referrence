@@ -152,22 +152,72 @@
   /* ==========================================================
      Showreel modal
      ========================================================== */
-  const showreel      = $('#modal');
-  const showreelVideo = $('#modal-video');
-  const showreelClose = $('#modal-close');
-  const showreelBtn   = $('#showreel-open');
+  const showreel         = $('#modal');
+  const showreelVideo    = $('#modal-video');
+  const showreelFallback = $('#modal-video-fallback');
+  const showreelClose    = $('#modal-close');
+  const showreelBtn      = $('#showreel-open');
+  let showreelBroken     = false;
+
+  function showVideoFallback() {
+    showreelBroken = true;
+    if (showreelVideo) {
+      showreelVideo.pause();
+      showreelVideo.classList.add('hidden');
+    }
+    if (showreelFallback) {
+      showreelFallback.classList.remove('hidden');
+      showreelFallback.classList.add('flex');
+    }
+  }
+
+  function clearVideoFallback() {
+    if (showreelVideo) showreelVideo.classList.remove('hidden');
+    if (showreelFallback) {
+      showreelFallback.classList.add('hidden');
+      showreelFallback.classList.remove('flex');
+    }
+  }
+
+  function resetShowreelVideo() {
+    if (!showreelVideo) return;
+    try {
+      showreelVideo.pause();
+      showreelVideo.currentTime = 0;
+    } catch {
+      // The file may be missing or metadata may not be loaded yet.
+    }
+  }
+
+  showreelVideo.addEventListener('error', showVideoFallback);
+  if (showreelVideo.error) showVideoFallback();
 
   function setShowreel(open) {
     if ((showreel.dataset.open === 'true') === open) return;
     showreel.dataset.open = String(open);
     lockScroll(open);
+
     if (open) {
       bg.pause();
-      showreelVideo.currentTime = 0;
-      showreelVideo.play().catch(() => {});
+
+      if (showreelBroken) {
+        showVideoFallback();
+      } else {
+        clearVideoFallback();
+        try { showreelVideo.currentTime = 0; } catch {}
+        const playback = showreelVideo.play();
+        if (playback && typeof playback.catch === 'function') {
+          playback.catch(() => {
+            // A missing file fires the error event. An autoplay block
+            // leaves the controls available for the user.
+            if (showreelVideo.error) showVideoFallback();
+          });
+        }
+      }
+
       showreelClose.focus();
     } else {
-      showreelVideo.pause();
+      resetShowreelVideo();
       playBg();
       showreelBtn.focus();
     }

@@ -450,6 +450,12 @@ def js_files(filename):
     return send_from_directory(str(BASE_DIR / "js"), filename)
 
 
+@app.get("/videos/<path:filename>")
+def video_files(filename):
+    """Serve local videos such as the TutorMatch intro."""
+    return send_from_directory(str(BASE_DIR / "videos"), filename)
+
+
 # ============================================================
 # API foundation
 # ============================================================

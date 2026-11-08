@@ -326,8 +326,11 @@
         Close <i data-lucide="x" class="h-4 w-4"></i>
       </button>
       <div class="aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-        <video id="modal-video" class="h-full w-full object-cover" playsinline controls preload="none"
-               src="https://strvid.nyc3.cdn.digitaloceanspaces.com/motionsite/creative_studio_video.mp4"></video>
+        <video id="modal-video" class="h-full w-full object-contain" playsinline controls preload="none"
+               src="videos/tutormatch-intro.mp4"></video>
+        <div id="modal-video-fallback" class="hidden h-full w-full flex-col items-center justify-center px-6 text-center" role="status">
+          <p class="text-lg font-semibold text-cream">Video coming soon.</p>
+        </div>
       </div>
     </div>
   </div>
