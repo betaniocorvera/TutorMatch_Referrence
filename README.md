@@ -1,8 +1,8 @@
-# TutorMatch — Landing Page + Authenticated Dashboard
+# TutorMatch — Landing Page, Dashboard, and Search Matching
 
 Public landing page and authenticated search dashboard for **TutorMatch A.I.**, a tutor-student matching and recommender system for Cabadbaran City, Agusan del Norte.
 
-HTML5 + Tailwind (CDN) + Vanilla JS, with a Flask/MySQL authentication backend.
+HTML5 + Tailwind (CDN) + Vanilla JS, with a Flask/MySQL backend for authentication, onboarding, profile persistence, and privacy-safe search matching.
 
 ## Run the full app
 
@@ -52,6 +52,26 @@ Open <http://127.0.0.1:5000>. An internet connection is needed for Tailwind, fon
 py -m flask --app app create-admin
 ```
 
+### Optional: seed fictional demo accounts
+
+```powershell
+py seed_demo.py
+```
+
+Use `--reset` to replace only the fictional `@example.test` demo accounts:
+
+```powershell
+py seed_demo.py --reset
+```
+
+The seeder creates 4 tutor and 4 student profiles from `mock/seed.json`. Demo accounts use the password `demo1234`:
+
+- Student: `ana@example.test`
+- Tutor: `maria@example.test`
+- Other demo accounts: `johnpaul@example.test`, `angelica@example.test`, `kevin@example.test`, `mark@example.test`, `shaira@example.test`, `reymart@example.test`
+
+`--reset` never deletes real accounts; it only deletes users whose email ends in `@example.test`.
+
 ## Auth flow
 
 - **Register** — creates an unverified account, emails a 6-digit code, and opens the verification form.
@@ -100,6 +120,41 @@ Photos are optional, limited to 1 MB, validated by magic bytes (JPG, PNG, WebP),
 
 Profile writes use `db.transaction()` so the profile row, subjects, availability, and display name stay in sync.
 
+## Search and matching
+
+Search is explicit. The dashboard shows an empty state until the user submits the form; it does not call the search API on page load.
+
+Students search for tutors and tutors search for students. The role is enforced by the server: calling the wrong endpoint returns `403`.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/search/tutors` | Student searching for tutors. |
+| `GET` | `/api/search/students` | Tutor searching for students. |
+| `GET` | `/api/profiles/<profile_id>` | Privacy-safe public profile preview. |
+
+Search reads live MySQL profile data. `js/data.js` contains only shared UI constants; there are no mock users or client-side matching rules anymore.
+
+Supported query parameters:
+
+- `q` — free-text keyword across name, headline, bio, area, and subjects.
+- `subjectId` — exact subject filter.
+- `level` — student level; used to score subject-level closeness.
+- `format` — `online`, `in_person`, or `both`.
+- `maxRateCentavos` (student search) or `minBudgetCentavos` (tutor search).
+- `availability` — comma-separated category tokens (`weekday-am`, `weekday-pm`, `weekday-eve`, `weekend`) or exact slots such as `tue:18:00-20:00`.
+- `maxDistanceMeters` — applied only to in-person or `both` profiles.
+- `style`, `goal` — comma-separated tag filters.
+- `sort` — `score` (default), `distance`, and `rate` for students or `budget` for tutors.
+- `page`, `limit` — pagination; `limit` defaults to 10 and is capped at 50.
+
+Ranking uses the documented starting weights: subject/level 35%, availability 20%, budget/rate 15%, distance 15%, and style/goal 15%. Each result returns `match.score`, `match.scoreMode`, `match.band`, `match.reasons`, `match.availabilityOverlap`, `match.warnings`, and `match.breakdown`. The current score is explicitly labelled `one-sided`; pair scoring is deferred. Results below the fair band are shown only when the search would otherwise be empty, and are labelled with a low-match warning.
+
+If an explicit distance filter is too narrow, the server retries without it and reports `relaxedFilters: ["distance"]`; the dashboard shows a visible notice. Budget, format, and availability filters are not silently relaxed.
+
+Distance comes from barangay centroids and Haversine, rounded to the nearest 100 m. Unknown barangays return `distanceMeters: null` with a warning; missing distance is never treated as zero. Location is always barangay-level only.
+
+Search results and public profiles never expose email, birthdate, exact coordinates, password hashes, verification documents, reports, or blocks.
+
 ## Files
 - `index.html` - landing page, auth modal (login, register, verify, reset)
 - `styles.css` - animations and form styling
@@ -111,23 +166,27 @@ Profile writes use `db.transaction()` so the profile row, subjects, availability
 - `js/onboarding.js` - wizard state, autosave, validation, preview
 - `js/auth.js` - shared API client, CSRF handling, session validation, profile methods
 - `js/dashboard.js` - async session guard, sidebar, hash routing, logout
-- `js/data.js` - mock users, hard filters, and placeholder match scoring
-- `js/search.js`, `js/profile.js`, `js/messages.js` - dashboard sections
-- `app.py` - Flask app, auth/onboarding/profile routes, static routes, security headers
+- `js/data.js` - shared UI constants for availability and labels only
+- `js/search.js` - API-backed search, filters, sorting, pagination, profile panel, requests
+- `js/profile.js`, `js/messages.js` - dashboard sections
+- `app.py` - Flask app, auth/onboarding/profile/search routes, static routes, security headers
 - `security.py` - validation, hashing, OTP/reset helpers, CSRF, sessions, rate limits
 - `db.py` - MySQL helpers
 - `mailer.py` - dev outbox / SMTP email helpers
-- `schema.sql` - MySQL schema
+- `schema.sql` - MySQL schema and reference subjects
+- `seed_demo.py` - fictional demo account/profile seeder
 - `uploads/avatars/` - optional profile photos (local, git-ignored)
-- `docs/` - Phase 1 product, API, and data documentation
-- `mock/seed.json` - fictional demo data for UI development
+- `docs/` - product, API, and data documentation for Phases 1–2
+- `mock/seed.json` - fictional demo data used by `seed_demo.py`
 
 ## Project docs
 - [Phase 1 — Foundations](docs/README.md)
 - [Screen map and user flows](docs/01-screen-map.md)
-- [Mock API contract](docs/02-api-contract.md)
+- [API contract](docs/02-api-contract.md)
 - [Data model](docs/03-data-model.md)
-- [Mock seed data](mock/seed.json)
+- [Demo seed data](mock/seed.json)
 
 ## Status
-The landing page, registration/login/verification/reset flow, secure sessions, onboarding/profile persistence, and authenticated dashboard shell are wired. Search results and sent requests are still demo data stored in the browser; KNN matching and a persistent requests/messages backend are next.
+The landing page, registration/login/verification/reset flow, secure sessions, onboarding/profile persistence, authenticated dashboard, and API-backed search matching are wired. Students and tutors can search each other, filter, sort, paginate, preview privacy-safe public profiles, and send local requests.
+
+Sent requests and messages are still stored in the browser. A persistent requests/messages backend and the evaluation baseline comparisons remain next.

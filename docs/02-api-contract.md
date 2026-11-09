@@ -1,9 +1,11 @@
-# TutorMatch A.I. — Mock API Contract
+# TutorMatch A.I. — API Contract
 
-**Phase:** 1 — Foundations  
-**Status:** Draft v0.1  
-**Base URL:** `/api`  
-**Last updated:** 2026-10-27
+**Phase:** 1–2 — Foundations + Search
+**Status:** Implemented for auth, onboarding, profiles, and search
+**Base URL:** `/api`
+**Last updated:** 2026-11-09
+
+> Implementation note: the Flask app uses secure session cookies plus CSRF tokens instead of Bearer tokens. Database-backed IDs are integers; the examples below keep the original opaque mock IDs. Response shapes and privacy rules are unchanged.
 
 ## 1. Purpose
 
@@ -373,6 +375,7 @@ Response `200`:
       },
       "match": {
         "score": 92,
+        "scoreMode": "one-sided",
         "band": "excellent",
         "reasons": [
           { "type": "subject", "label": "Teaches Calculus" },
@@ -426,6 +429,7 @@ Tutor searching for students. Symmetric response shape.
 | Field | Type | Notes |
 |---|---|---|
 | `score` | integer 0–100 | Pair score, computed from both directions where possible |
+| `scoreMode` | string | `one-sided` while only the viewer-perspective score is implemented |
 | `band` | enum | `excellent`, `good`, `fair`, `low` |
 | `reasons` | array | Top 3 positive contributions, derived from actual feature contributions |
 | `availabilityOverlap` | array | Slots where both people are free |

@@ -347,6 +347,8 @@ Profiles below the minimum are hidden from search and show a checklist in the pr
 - Blocked users excluded.
 - Incomplete profiles excluded.
 
+> Phase 2 implementation note: format and role are always hard filters. Budget/rate and availability are hard filters only when the search supplies an explicit value; otherwise they remain soft scoring features. Distance is hard only when `maxDistanceMeters` is supplied and the candidate is in-person or `both`.
+
 ### 7.2 Soft features and suggested weights
 
 | Feature | Encoding | Distance | Starting weight |
@@ -371,6 +373,8 @@ Pair score:
 - Compute student-to-tutor fit and tutor-to-student fit where data allows.
 - Final score is a weighted average, or the minimum of the two for stricter matching.
 - A one-sided score must be labelled as such in the API response.
+
+> Phase 2 implementation note: the current search score is viewer-perspective and uses both profiles' data. A separate reverse-direction score and pair-score label are deferred to the evaluation phase.
 
 ### 7.4 Explanation
 

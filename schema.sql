@@ -193,6 +193,7 @@ INSERT IGNORE INTO subjects (id, name, category) VALUES
   ('sub_chemistry', 'Chemistry', 'Science'),
   ('sub_biology', 'Biology', 'Science'),
   ('sub_english', 'English', 'Languages'),
+  ('sub_filipino', 'Filipino', 'Languages'),
   ('sub_ielts', 'IELTS', 'Languages'),
   ('sub_programming', 'Programming', 'Technology'),
   ('sub_python', 'Python', 'Technology'),

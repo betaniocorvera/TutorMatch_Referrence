@@ -106,15 +106,44 @@
                 <span>Subject</span>
                 <select id="filter-subject">
                   <option value="all">Any subject</option>
-                  <option value="Mathematics">Mathematics</option>
-                  <option value="Algebra">Algebra</option>
-                  <option value="Calculus">Calculus</option>
-                  <option value="Physics">Physics</option>
-                  <option value="Chemistry">Chemistry</option>
-                  <option value="Biology">Biology</option>
-                  <option value="English">English</option>
-                  <option value="IELTS">IELTS</option>
-                  <option value="Python">Python</option>
+                  <optgroup label="Mathematics">
+                    <option value="sub_mathematics">Mathematics</option>
+                    <option value="sub_algebra">Algebra</option>
+                    <option value="sub_calculus">Calculus</option>
+                    <option value="sub_geometry">Geometry</option>
+                    <option value="sub_statistics">Statistics</option>
+                  </optgroup>
+                  <optgroup label="Science">
+                    <option value="sub_physics">Physics</option>
+                    <option value="sub_chemistry">Chemistry</option>
+                    <option value="sub_biology">Biology</option>
+                  </optgroup>
+                  <optgroup label="Languages">
+                    <option value="sub_english">English</option>
+                    <option value="sub_filipino">Filipino</option>
+                    <option value="sub_ielts">IELTS</option>
+                  </optgroup>
+                  <optgroup label="Technology">
+                    <option value="sub_programming">Programming</option>
+                    <option value="sub_python">Python</option>
+                    <option value="sub_web">Web Development</option>
+                  </optgroup>
+                  <optgroup label="Business">
+                    <option value="sub_accounting">Accounting</option>
+                    <option value="sub_economics">Economics</option>
+                  </optgroup>
+                </select>
+              </label>
+
+              <label class="filter-field" for="filter-level">
+                <span>Level</span>
+                <select id="filter-level">
+                  <option value="any">Any level</option>
+                  <option value="elementary">Elementary</option>
+                  <option value="high_school">High school</option>
+                  <option value="senior_high">Senior high</option>
+                  <option value="college">College</option>
+                  <option value="adult">Adult learner</option>
                 </select>
               </label>
 
@@ -123,19 +152,19 @@
                 <select id="filter-format">
                   <option value="any">Any format</option>
                   <option value="online">Online</option>
-                  <option value="in-person">In-person</option>
-                  <option value="either">Either</option>
+                  <option value="in_person">In-person</option>
+                  <option value="both">Online or in-person</option>
                 </select>
               </label>
 
               <label class="filter-field" for="filter-price">
-                <span>Price</span>
+                <span id="filter-price-label">Max rate</span>
                 <select id="filter-price">
-                  <option value="any">Any price</option>
-                  <option value="under-15">Under $15 / hr</option>
-                  <option value="15-25">$15–$25 / hr</option>
-                  <option value="25-35">$25–$35 / hr</option>
-                  <option value="35-plus">$35+ / hr</option>
+                  <option value="any" data-student-label="Any price" data-tutor-label="Any budget">Any price</option>
+                  <option value="20000" data-student-label="Up to ₱200 / hr" data-tutor-label="At least ₱200 / hr">Up to ₱200 / hr</option>
+                  <option value="30000" data-student-label="Up to ₱300 / hr" data-tutor-label="At least ₱300 / hr">Up to ₱300 / hr</option>
+                  <option value="40000" data-student-label="Up to ₱400 / hr" data-tutor-label="At least ₱400 / hr">Up to ₱400 / hr</option>
+                  <option value="50000" data-student-label="Up to ₱500 / hr" data-tutor-label="At least ₱500 / hr">Up to ₱500 / hr</option>
                 </select>
               </label>
 
@@ -170,7 +199,17 @@
             <p id="profile-banner">Loading your profile completeness…</p>
           </div>
 
-          <div id="results-meta" class="results-meta" hidden></div>
+          <div id="results-meta" class="results-meta" hidden>
+            <span id="results-count"></span>
+            <label class="sort-control" for="sort-results">
+              <span>Sort</span>
+              <select id="sort-results">
+                <option value="score">Best match</option>
+                <option value="distance">Nearest</option>
+                <option value="rate" data-sort-third>Lowest rate</option>
+              </select>
+            </label>
+          </div>
           <div id="search-state" class="search-state" aria-live="polite"></div>
         </section>
 

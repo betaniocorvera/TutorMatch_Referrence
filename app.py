@@ -15,6 +15,7 @@
 
 import getpass
 import json
+import math
 import os
 import re
 import secrets
@@ -114,6 +115,60 @@ REQUIRED_FIELD_MESSAGES = {
     "budget": "Add your budget range.",
     "format": "Choose a session format.",
     "area": "Add your barangay.",
+}
+
+# Search weights follow docs/03-data-model.md. They are intentionally
+# visible in one place so they can be tuned with evidence later.
+MATCH_WEIGHTS = {
+    "subject": 0.35,
+    "availability": 0.20,
+    "budget": 0.15,
+    "distance": 0.15,
+    "styleGoal": 0.15,
+}
+LEVEL_RANK = {level: index for index, level in enumerate(PROFILE_LEVELS)}
+DAY_LABELS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+# Approximate barangay centroids for Cabadbaran City. These are only
+# used to compute a coarse distance rounded to the nearest 100 m. The
+# exact coordinates are never returned by the API.
+CABADBARAN_CENTER = (9.1236, 125.5345)
+BARANGAY_CENTROIDS = {
+    "del pilar": (9.1202, 125.5361),
+    "calibunan": (9.1020, 125.5210),
+    "comagascas": (9.1390, 125.5480),
+    "katugasan": (9.1080, 125.5010),
+    "concepcion": (9.1320, 125.5400),
+    "san agustin": (9.1450, 125.5300),
+    "san jose": (9.1180, 125.5280),
+    "mabini": (9.1100, 125.5450),
+    "la union": (9.1350, 125.5150),
+    "sanghan": (9.1000, 125.5400),
+    "marang": (9.1500, 125.5600),
+    "tagmamarkay": (9.0900, 125.5100),
+    "tagongtong": (9.1600, 125.5200),
+    "tubo-tubo": (9.0800, 125.5500),
+}
+
+# The UI uses coarse three-hour windows for the mini availability grid.
+# Search itself compares the exact HH:MM slots stored in MySQL.
+AVAILABILITY_FILTERS = {
+    "weekday-am": [
+        {"day": day, "start": "06:00", "end": "12:00"}
+        for day in DAYS[:5]
+    ],
+    "weekday-pm": [
+        {"day": day, "start": "12:00", "end": "18:00"}
+        for day in DAYS[:5]
+    ],
+    "weekday-eve": [
+        {"day": day, "start": "18:00", "end": "24:00"}
+        for day in DAYS[:5]
+    ],
+    "weekend": [
+        {"day": "sat", "start": "00:00", "end": "24:00"},
+        {"day": "sun", "start": "00:00", "end": "24:00"},
+    ],
 }
 
 # ============================================================
@@ -895,6 +950,1201 @@ def looks_like_image(data, mime):
     if mime == "image/webp":
         return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
     return False
+
+
+# ============================================================
+# Search and matching helpers
+# ============================================================
+def _to_minutes(value):
+    """Convert HH:MM (or 24:00) to minutes from midnight."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "24:00":
+        return 24 * 60
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if not match:
+        return None
+    hours = int(match.group(1))
+    minutes = int(match.group(2))
+    if hours > 24 or minutes > 59 or (hours == 24 and minutes != 0):
+        return None
+    return hours * 60 + minutes
+
+
+def _minutes_text(value):
+    """Convert minutes from midnight back to HH:MM."""
+    value = max(0, min(24 * 60, int(value)))
+    if value == 24 * 60:
+        return "24:00"
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def _time_label(value):
+    """Format a time for a short plain-language reason."""
+    minutes = _to_minutes(value)
+    if minutes is None:
+        return str(value or "")
+    hours = (minutes // 60) % 24
+    mins = minutes % 60
+    suffix = "AM" if hours < 12 else "PM"
+    display = hours % 12 or 12
+    if mins:
+        return f"{display}:{mins:02d} {suffix}"
+    return f"{display} {suffix}"
+
+
+def _range_label(start, end):
+    """Format a compact time range such as 6–8 PM."""
+    start_minutes = _to_minutes(start)
+    end_minutes = _to_minutes(end)
+    if start_minutes is None or end_minutes is None:
+        return f"{start}–{end}"
+    start_hour = (start_minutes // 60) % 24
+    end_hour = (end_minutes // 60) % 24
+    start_suffix = "AM" if start_hour < 12 else "PM"
+    end_suffix = "AM" if end_hour < 12 else "PM"
+    start_display = start_hour % 12 or 12
+    end_display = end_hour % 12 or 12
+    if start_minutes % 60 == 0 and end_minutes % 60 == 0:
+        if start_suffix == end_suffix:
+            return f"{start_display}–{end_display} {end_suffix}"
+        return f"{start_display} {start_suffix}–{end_display} {end_suffix}"
+    return f"{_time_label(start)}–{_time_label(end)}"
+
+
+def _money_text(centavos):
+    """Format integer centavos for a reason or warning."""
+    if centavos is None:
+        return None
+    pesos = int(centavos) / 100
+    if pesos.is_integer():
+        return f"₱{int(pesos):,}"
+    return f"₱{pesos:,.2f}"
+
+
+def _barangay_coords(barangay, city=None):
+    """Return a coarse centroid for a Cabadbaran barangay, or None."""
+    if not barangay:
+        return None
+    if city and "cabadbaran" not in str(city).lower():
+        return None
+    text = str(barangay).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"\b(brgy|barangay|poblacion|pob)\b", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    if text in BARANGAY_CENTROIDS:
+        return BARANGAY_CENTROIDS[text]
+    digits = re.search(r"\d+", text)
+    if digits:
+        number = int(digits.group())
+        angle = (number % 12) * (2 * math.pi / 12)
+        radius = 0.012
+        return (
+            CABADBARAN_CENTER[0] + radius * math.cos(angle),
+            CABADBARAN_CENTER[1] + radius * math.sin(angle),
+        )
+    return None
+
+
+def _haversine_meters(lat1, lon1, lat2, lon2):
+    """Great-circle distance in metres."""
+    radius = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    )
+    return 2 * radius * math.asin(math.sqrt(a))
+
+
+def _distance_meters(viewer_profile, candidate_row):
+    """Coarse distance rounded to the nearest 100 m, or None."""
+    viewer_area = (viewer_profile or {}).get("area") or {}
+    start = _barangay_coords(
+        viewer_area.get("barangay"),
+        viewer_area.get("city"),
+    )
+    end = _barangay_coords(
+        candidate_row.get("area_barangay"),
+        candidate_row.get("area_city"),
+    )
+    if not start or not end:
+        return None
+    meters = _haversine_meters(start[0], start[1], end[0], end[1])
+    return int(round(meters / 100.0) * 100)
+
+
+def _overlap_intervals(left_slots, right_slots):
+    """Return merged day/time intervals where two availability lists meet."""
+    grouped = {}
+    for left in left_slots or []:
+        left_start = _to_minutes(left.get("start"))
+        left_end = _to_minutes(left.get("end"))
+        if left_start is None or left_end is None or left_start >= left_end:
+            continue
+        for right in right_slots or []:
+            if left.get("day") != right.get("day"):
+                continue
+            right_start = _to_minutes(right.get("start"))
+            right_end = _to_minutes(right.get("end"))
+            if right_start is None or right_end is None:
+                continue
+            start = max(left_start, right_start)
+            end = min(left_end, right_end)
+            if start < end:
+                grouped.setdefault(left["day"], []).append((start, end))
+
+    merged = []
+    for day in DAYS:
+        intervals = sorted(grouped.get(day, []))
+        for start, end in intervals:
+            if (
+                merged
+                and merged[-1]["day"] == day
+                and start <= _to_minutes(merged[-1]["end"])
+            ):
+                merged[-1]["end"] = _minutes_text(
+                    max(_to_minutes(merged[-1]["end"]), end)
+                )
+            else:
+                merged.append({
+                    "day": day,
+                    "start": _minutes_text(start),
+                    "end": _minutes_text(end),
+                })
+    return merged
+
+
+def _overlap_minutes(intervals):
+    """Total minutes covered by merged intervals."""
+    total = 0
+    for interval in intervals or []:
+        start = _to_minutes(interval.get("start"))
+        end = _to_minutes(interval.get("end"))
+        if start is not None and end is not None and end > start:
+            total += end - start
+    return total
+
+
+def _availability_score(target_slots, candidate_slots):
+    """Jaccard-style availability overlap against a target schedule."""
+    merged_target = _overlap_intervals(target_slots, target_slots)
+    target_minutes = _overlap_minutes(merged_target)
+    if not target_minutes:
+        return 0.5, []
+    overlap = _overlap_intervals(target_slots, candidate_slots)
+    score = min(1.0, _overlap_minutes(overlap) / target_minutes)
+    return score, overlap
+
+
+def _format_compatible(left, right):
+    """True when two people can meet in at least one common format."""
+    if not left or not right:
+        return True
+    if left == "both" or right == "both":
+        return True
+    return left == right
+
+
+def _format_matches_filter(requested, candidate):
+    """Apply the explicit format filter from the query string."""
+    if not requested or requested == "any":
+        return True
+    if requested == "online":
+        return candidate in ("online", "both")
+    if requested == "in_person":
+        return candidate in ("in_person", "both")
+    if requested == "both":
+        return candidate == "both"
+    return True
+
+
+def _level_closeness(left, right):
+    """1.0 for the same level, smaller values for a larger gap."""
+    if left not in LEVEL_RANK or right not in LEVEL_RANK:
+        return 0.5
+    difference = abs(LEVEL_RANK[left] - LEVEL_RANK[right])
+    if difference == 0:
+        return 1.0
+    if difference == 1:
+        return 0.75
+    if difference == 2:
+        return 0.5
+    return 0.25
+
+
+def _jaccard(left, right):
+    """Jaccard similarity, or None when one side has no data."""
+    left_set = set(left or [])
+    right_set = set(right or [])
+    if not left_set or not right_set:
+        return None
+    return len(left_set & right_set) / len(left_set | right_set)
+
+
+def _parse_int_arg(name, default=None, minimum=0, maximum=None):
+    """Read an integer query parameter and return (value, error)."""
+    raw = request.args.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default, None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default, "Enter a whole number."
+    if value < minimum:
+        return default, f"Enter a value of at least {minimum}."
+    if maximum is not None and value > maximum:
+        return default, f"Enter a value no higher than {maximum}."
+    return value, None
+
+
+def _parse_tag_filter(raw, allowed, field, fields):
+    """Read a comma-separated soft tag filter."""
+    if not raw:
+        return []
+    result = []
+    for token in str(raw).split(","):
+        tag = token.strip()
+        if not tag:
+            continue
+        if tag not in allowed:
+            fields[field] = "Choose valid tags."
+            return []
+        if tag not in result:
+            result.append(tag)
+    return result
+
+
+def _parse_availability_filter(raw):
+    """Read category tokens or exact day:HH:MM-HH:MM slots."""
+    if not raw:
+        return [], None
+    result = []
+    for token in str(raw).split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if token in AVAILABILITY_FILTERS:
+            result.extend(AVAILABILITY_FILTERS[token])
+            continue
+        match = re.fullmatch(
+            r"([a-z]{3}):(\d{1,2}:\d{2})-(\d{1,2}:\d{2})",
+            token,
+        )
+        if not match:
+            return [], "Choose valid availability."
+        day, start, end = match.groups()
+        start_minutes = _to_minutes(start)
+        end_minutes = _to_minutes(end)
+        if (
+            day not in DAY_INDEX
+            or start_minutes is None
+            or end_minutes is None
+            or start_minutes >= end_minutes
+        ):
+            return [], "Choose valid availability."
+        result.append({"day": day, "start": start, "end": end})
+    return result, None
+
+
+def _viewer_profile(user_id):
+    """Return the account row and a search-friendly private profile."""
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return None, None
+    profile = get_profile_payload(user_id)
+    if not profile:
+        profile = {
+            "id": None,
+            "userId": user["id"],
+            "role": user["role"],
+            "name": user["name"],
+            "area": {"barangay": None, "city": "Cabadbaran City"},
+            "subjects": [],
+            "availability": [],
+            "styleTags": [],
+            "goalTags": [],
+            "rateCentavos": None,
+            "budgetMinCentavos": None,
+            "budgetMaxCentavos": None,
+            "format": None,
+            "verified": False,
+        }
+    return user, profile
+
+
+def _load_search_candidates(role):
+    """Load opposite-role profiles with their subjects and availability."""
+    rows = db.query_all(
+        """
+        SELECT p.id, p.user_id, p.photo_url, p.bio, p.headline, p.status,
+               p.format, p.area_barangay, p.area_city, p.coarse_geohash,
+               p.rate_centavos, p.budget_min_centavos, p.budget_max_centavos,
+               p.currency, p.style_tags, p.goal_tags, p.completeness,
+               p.onboarding_completed_at, p.verified_at, p.response_time_mins,
+               p.last_active_at,
+               u.id AS account_id, u.role AS account_role,
+               u.name AS account_name, u.last_login_at
+        FROM profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE u.role = %s
+          AND u.status = 'active'
+          AND p.onboarding_completed_at IS NOT NULL
+        ORDER BY p.id
+        """,
+        (role,),
+    )
+    if not rows:
+        return []
+
+    profile_ids = [row["id"] for row in rows]
+    placeholders = ", ".join(["%s"] * len(profile_ids))
+    subject_rows = db.query_all(
+        f"""
+        SELECT ps.profile_id, ps.subject_id, ps.level, ps.kind,
+               s.name, s.category
+        FROM profile_subjects ps
+        JOIN subjects s ON s.id = ps.subject_id
+        WHERE ps.profile_id IN ({placeholders})
+        ORDER BY s.category, s.name
+        """,
+        tuple(profile_ids),
+    )
+    availability_rows = db.query_all(
+        f"""
+        SELECT profile_id, day_of_week, start_time, end_time
+        FROM availability_slots
+        WHERE profile_id IN ({placeholders})
+        ORDER BY day_of_week, start_time
+        """,
+        tuple(profile_ids),
+    )
+
+    subjects_by_profile = {}
+    for row in subject_rows:
+        subjects_by_profile.setdefault(row["profile_id"], []).append({
+            "id": row["subject_id"],
+            "name": row["name"],
+            "category": row["category"],
+            "level": row["level"],
+            "kind": row["kind"],
+        })
+
+    availability_by_profile = {}
+    for row in availability_rows:
+        if 1 <= row["day_of_week"] <= 7:
+            availability_by_profile.setdefault(row["profile_id"], []).append({
+                "day": DAYS[row["day_of_week"] - 1],
+                "start": _time_text(row["start_time"]),
+                "end": _time_text(row["end_time"]),
+            })
+
+    candidates = []
+    for row in rows:
+        candidates.append({
+            "row": row,
+            "user": {
+                "id": row["account_id"],
+                "role": row["account_role"],
+                "name": row["account_name"],
+                "last_login_at": row["last_login_at"],
+            },
+            "subjects": subjects_by_profile.get(row["id"], []),
+            "availability": availability_by_profile.get(row["id"], []),
+        })
+    return candidates
+
+
+def _profile_is_searchable(candidate):
+    """Apply the minimum profile rules from docs/03-data-model.md."""
+    row = candidate["row"]
+    if not row.get("onboarding_completed_at"):
+        return False
+    if len(str(row.get("bio") or "").strip()) < 10:
+        return False
+    if not str(row.get("area_barangay") or "").strip():
+        return False
+    if not row.get("format"):
+        return False
+    if not candidate["subjects"] or not candidate["availability"]:
+        return False
+    if candidate["user"]["role"] == "tutor" and row.get("rate_centavos") is None:
+        return False
+    if candidate["user"]["role"] == "student":
+        if (
+            row.get("budget_min_centavos") is None
+            or row.get("budget_max_centavos") is None
+        ):
+            return False
+    return True
+
+
+def _subject_score(viewer_subjects, candidate_subjects, subject_id=None, level=None):
+    """Score subject overlap and return the best subject for the reason."""
+    candidate_by_id = {}
+    for subject in candidate_subjects:
+        candidate_by_id.setdefault(subject["id"], []).append(subject)
+
+    if subject_id:
+        matches = candidate_by_id.get(subject_id, [])
+        if not matches:
+            return 0.0, None, []
+        if level:
+            best = max(
+                matches,
+                key=lambda subject: _level_closeness(subject["level"], level),
+            )
+            return _level_closeness(best["level"], level), best, matches
+        return 1.0, matches[0], matches
+
+    viewer_ids = {subject["id"] for subject in viewer_subjects}
+    if not viewer_ids:
+        return 0.5, None, []
+    candidate_ids = set(candidate_by_id)
+    common = viewer_ids & candidate_ids
+    if not common:
+        return 0.0, None, []
+
+    jaccard = len(common) / len(viewer_ids | candidate_ids)
+    level_scores = []
+    for subject_id_value in common:
+        viewer_levels = [
+            subject["level"]
+            for subject in viewer_subjects
+            if subject["id"] == subject_id_value
+        ]
+        candidate_levels = [
+            subject["level"]
+            for subject in candidate_by_id[subject_id_value]
+        ]
+        level_scores.append(max(
+            _level_closeness(candidate_level, viewer_level)
+            for candidate_level in candidate_levels
+            for viewer_level in viewer_levels
+        ))
+    level_average = sum(level_scores) / len(level_scores)
+    score = 0.6 * jaccard + 0.4 * level_average
+
+    best_subject = None
+    best_level_score = -1
+    for subject in candidate_subjects:
+        if subject["id"] not in common:
+            continue
+        viewer_levels = [
+            viewer_subject["level"]
+            for viewer_subject in viewer_subjects
+            if viewer_subject["id"] == subject["id"]
+        ]
+        closeness = max(
+            _level_closeness(subject["level"], viewer_level)
+            for viewer_level in viewer_levels
+        )
+        if closeness > best_level_score:
+            best_level_score = closeness
+            best_subject = subject
+    return score, best_subject, [
+        subject for subject in candidate_subjects if subject["id"] in common
+    ]
+
+
+def _style_goal_score(viewer, candidate, style_filter, goal_filter):
+    """Score style and goal tags together, ignoring missing sections."""
+    style_target = style_filter or viewer.get("styleTags") or []
+    goal_target = goal_filter or viewer.get("goalTags") or []
+    style = _jaccard(style_target, candidate["row"].get("style_tags"))
+    goal = _jaccard(goal_target, candidate["row"].get("goal_tags"))
+    parts = [value for value in (style, goal) if value is not None]
+    if not parts:
+        return 0.5, [], []
+    style_common = list(
+        set(style_target)
+        & set(_json_list(candidate["row"].get("style_tags")))
+    )
+    goal_common = list(
+        set(goal_target)
+        & set(_json_list(candidate["row"].get("goal_tags")))
+    )
+    return sum(parts) / len(parts), style_common, goal_common
+
+
+def _budget_score(viewer, candidate, hard_max_rate, hard_min_budget):
+    """Score budget fit and return a soft warning when it is close."""
+    row = candidate["row"]
+    if viewer["role"] == "student":
+        rate = row.get("rate_centavos")
+        budget = (
+            hard_max_rate
+            if hard_max_rate is not None
+            else viewer.get("budgetMaxCentavos")
+        )
+        if rate is None or budget is None or budget <= 0:
+            return 0.5, None
+        if rate <= budget:
+            return 1.0, None
+        over = rate - budget
+        score = max(0.0, 1.0 - (over / max(budget, 1)))
+        return score, f"{_money_text(over)} above your {_money_text(budget)} budget"
+
+    student_budget = row.get("budget_max_centavos")
+    rate = (
+        hard_min_budget
+        if hard_min_budget is not None
+        else viewer.get("rateCentavos")
+    )
+    if student_budget is None or rate is None or rate <= 0:
+        return 0.5, None
+    if student_budget >= rate:
+        return 1.0, None
+    short = rate - student_budget
+    score = max(0.0, 1.0 - (short / max(rate, 1)))
+    return score, f"Budget is {_money_text(short)} below your {_money_text(rate)} rate"
+
+
+def _distance_score(candidate_row, distance_meters, max_distance_meters):
+    """Score distance, or neutral for online-only candidates."""
+    if candidate_row.get("format") == "online":
+        return 1.0
+    if distance_meters is None:
+        return 0.5
+    radius = (
+        max_distance_meters
+        if max_distance_meters and max_distance_meters > 0
+        else 20000
+    )
+    return max(0.0, min(1.0, 1.0 - (distance_meters / radius)))
+
+
+def _band_for_score(score):
+    """Map a 0–100 similarity score to the UI band."""
+    if score >= 85:
+        return "excellent"
+    if score >= 70:
+        return "good"
+    if score >= 50:
+        return "fair"
+    return "low"
+
+
+def _availability_summary(overlap):
+    """Build a compact reason such as 'Tue & Thu, 6–8 PM'."""
+    if not overlap:
+        return ""
+    day_names = []
+    for interval in overlap:
+        label = DAY_LABELS[DAYS.index(interval["day"])]
+        if label not in day_names:
+            day_names.append(label)
+    ranges = []
+    for interval in overlap:
+        label = _range_label(interval["start"], interval["end"])
+        if label not in ranges:
+            ranges.append(label)
+    days = " & ".join(day_names[:2])
+    if len(day_names) > 2:
+        days += f" + {len(day_names) - 2} more"
+    if not ranges:
+        return days
+    return f"{days}, {ranges[0]}"
+
+
+def _build_reasons(
+    viewer,
+    candidate,
+    features,
+    subject_info,
+    overlap,
+    distance_meters,
+    hard_max_rate,
+    hard_min_budget,
+    style_common,
+    goal_common,
+):
+    """Turn the strongest positive contributions into at most three reasons."""
+    reasons = []
+    row = candidate["row"]
+
+    if features["subject"] >= 0.55 and subject_info:
+        name = subject_info.get("name") or "a shared subject"
+        if viewer["role"] == "student":
+            label = f"Teaches {name}"
+        else:
+            label = f"Needs help with {name}"
+        reasons.append(("subject", label, MATCH_WEIGHTS["subject"] * features["subject"]))
+
+    if features["availability"] >= 0.25 and overlap:
+        label = f"Free {_availability_summary(overlap)}"
+        reasons.append(("availability", label, MATCH_WEIGHTS["availability"] * features["availability"]))
+
+    if features["budget"] >= 0.85:
+        if viewer["role"] == "student":
+            budget = (
+                hard_max_rate
+                if hard_max_rate is not None
+                else viewer.get("budgetMaxCentavos")
+            )
+            if budget is not None:
+                reasons.append((
+                    "budget",
+                    f"Within your {_money_text(budget)} budget",
+                    MATCH_WEIGHTS["budget"] * features["budget"],
+                ))
+        else:
+            rate = (
+                hard_min_budget
+                if hard_min_budget is not None
+                else viewer.get("rateCentavos")
+            )
+            if rate is not None:
+                reasons.append((
+                    "budget",
+                    f"Budget covers your {_money_text(rate)} rate",
+                    MATCH_WEIGHTS["budget"] * features["budget"],
+                ))
+
+    if (
+        features["distance"] >= 0.55
+        and distance_meters is not None
+        and row.get("format") != "online"
+    ):
+        if distance_meters == 0:
+            distance_label = "Same barangay"
+        elif distance_meters < 1000:
+            distance_label = f"Only {distance_meters} m away"
+        else:
+            distance_label = f"Only {distance_meters / 1000:.1f} km away"
+        reasons.append((
+            "distance",
+            distance_label,
+            MATCH_WEIGHTS["distance"] * features["distance"],
+        ))
+
+    if style_common:
+        tags = ", ".join(tag.replace("_", " ") for tag in style_common[:2])
+        if viewer["role"] == "student":
+            label = f"Uses a {tags} style"
+        else:
+            label = f"Prefers {tags} learning"
+        reasons.append(("style", label, MATCH_WEIGHTS["styleGoal"] * features["styleGoal"]))
+
+    if goal_common:
+        tags = ", ".join(tag.replace("_", " ") for tag in goal_common[:2])
+        reasons.append((
+            "goal",
+            f"Shares your {tags} goal",
+            MATCH_WEIGHTS["styleGoal"] * features["styleGoal"],
+        ))
+
+    if row.get("verified_at"):
+        reasons.append(("verification", "Verified profile", 0.02))
+    if row.get("response_time_mins"):
+        reasons.append((
+            "response",
+            f"Usually replies in {row['response_time_mins']} min",
+            0.01,
+        ))
+
+    reasons.sort(key=lambda item: item[2], reverse=True)
+    return [
+        {"type": reason_type, "label": label}
+        for reason_type, label, _score in reasons[:3]
+    ]
+
+
+def _build_match(
+    viewer,
+    candidate,
+    distance_meters,
+    max_distance_meters,
+    hard_max_rate,
+    hard_min_budget,
+    target_slots,
+    style_filter,
+    goal_filter,
+):
+    """Compute the score, band, reasons, overlap, warnings, and breakdown."""
+    subject_score, subject_info, _common_subjects = _subject_score(
+        viewer.get("subjects") or [],
+        candidate["subjects"],
+        subject_id=viewer.get("_subject_id"),
+        level=viewer.get("_level"),
+    )
+    availability_score, overlap = _availability_score(
+        target_slots,
+        candidate["availability"],
+    )
+    budget_score, budget_warning = _budget_score(
+        viewer,
+        candidate,
+        hard_max_rate,
+        hard_min_budget,
+    )
+    distance_score = _distance_score(
+        candidate["row"],
+        distance_meters,
+        max_distance_meters,
+    )
+    style_goal_score, style_common, goal_common = _style_goal_score(
+        viewer,
+        candidate,
+        style_filter,
+        goal_filter,
+    )
+
+    features = {
+        "subject": subject_score,
+        "availability": availability_score,
+        "budget": budget_score,
+        "distance": distance_score,
+        "styleGoal": style_goal_score,
+    }
+    score = round(100 * sum(
+        MATCH_WEIGHTS[key] * features[key]
+        for key in MATCH_WEIGHTS
+    ))
+    score = max(0, min(100, score))
+    band = _band_for_score(score)
+
+    warnings = []
+    if budget_warning:
+        warnings.append(budget_warning)
+    if distance_meters is None and candidate["row"].get("format") in ("in_person", "both"):
+        warnings.append("Distance is unavailable for this barangay.")
+
+    reasons = _build_reasons(
+        viewer,
+        candidate,
+        features,
+        subject_info,
+        overlap,
+        distance_meters,
+        hard_max_rate,
+        hard_min_budget,
+        style_common,
+        goal_common,
+    )
+    breakdown = {
+        key: round(MATCH_WEIGHTS[key] * features[key], 4)
+        for key in MATCH_WEIGHTS
+    }
+    return {
+        "score": score,
+        "scoreMode": "one-sided",
+        "band": band,
+        "reasons": reasons,
+        "availabilityOverlap": overlap,
+        "warnings": warnings,
+        "breakdown": breakdown,
+    }
+
+
+def _public_profile(candidate, viewer, distance_meters):
+    """Serialize only fields allowed by the privacy matrix."""
+    row = candidate["row"]
+    user = candidate["user"]
+    profile = {
+        "id": row["id"],
+        "userId": user["id"],
+        "role": user["role"],
+        "name": user["name"],
+        "photoUrl": row.get("photo_url"),
+        "headline": row.get("headline"),
+        "bio": row.get("bio"),
+        "status": row.get("status"),
+        "format": row.get("format"),
+        "area": {
+            "barangay": row.get("area_barangay"),
+            "city": row.get("area_city") or "Cabadbaran City",
+        },
+        "distanceMeters": distance_meters,
+        "subjects": [
+            {
+                "id": subject["id"],
+                "name": subject["name"],
+                "level": subject["level"],
+            }
+            for subject in candidate["subjects"]
+        ],
+        "styleTags": _json_list(row.get("style_tags")),
+        "goalTags": _json_list(row.get("goal_tags")),
+        "availability": candidate["availability"],
+        "verified": row.get("verified_at") is not None,
+        "responseTimeMins": row.get("response_time_mins"),
+        "lastActiveAt": _datetime_text(
+            row.get("last_active_at") or user.get("last_login_at")
+        ),
+        "reviews": {"count": 0, "average": None},
+    }
+    if user["role"] == "tutor":
+        profile["rateCentavos"] = row.get("rate_centavos")
+    else:
+        profile["budgetMinCentavos"] = row.get("budget_min_centavos")
+        profile["budgetMaxCentavos"] = row.get("budget_max_centavos")
+    return profile
+
+
+def _candidate_matches(
+    viewer,
+    candidate,
+    subject_id,
+    requested_format,
+    hard_max_rate,
+    hard_min_budget,
+    max_distance_meters,
+    requested_slots,
+    query_text,
+):
+    """Apply all hard filters before ranking."""
+    if not _profile_is_searchable(candidate):
+        return False
+    if candidate["user"]["role"] == viewer["role"]:
+        return False
+    if not _format_compatible(viewer.get("format"), candidate["row"].get("format")):
+        return False
+    if not _format_matches_filter(requested_format, candidate["row"].get("format")):
+        return False
+
+    row = candidate["row"]
+    if viewer["role"] == "student":
+        if (
+            hard_max_rate is not None
+            and row.get("rate_centavos") is not None
+            and row["rate_centavos"] > hard_max_rate
+        ):
+            return False
+    else:
+        if (
+            hard_min_budget is not None
+            and row.get("budget_max_centavos") is not None
+            and row["budget_max_centavos"] < hard_min_budget
+        ):
+            return False
+
+    if subject_id and not any(
+        subject["id"] == subject_id for subject in candidate["subjects"]
+    ):
+        return False
+
+    if requested_slots:
+        overlap = _overlap_intervals(requested_slots, candidate["availability"])
+        if not overlap:
+            return False
+
+    if max_distance_meters is not None and row.get("format") in ("in_person", "both"):
+        distance = _distance_meters(viewer, row)
+        if distance is not None and distance > max_distance_meters:
+            return False
+
+    if query_text:
+        terms = query_text.lower().split()
+        haystack = " ".join([
+            str(row.get("headline") or ""),
+            str(row.get("bio") or ""),
+            str(row.get("area_barangay") or ""),
+            str(row.get("area_city") or ""),
+            candidate["user"]["name"],
+            *[subject["name"] for subject in candidate["subjects"]],
+            *[subject["category"] for subject in candidate["subjects"]],
+        ]).lower()
+        if not all(term in haystack for term in terms):
+            return False
+    return True
+
+
+def _sort_results(results, sort):
+    """Sort scored results in place and return them."""
+    if sort == "distance":
+        results.sort(key=lambda item: (
+            item["profile"].get("distanceMeters") is None,
+            item["profile"].get("distanceMeters") or 0,
+            -item["match"]["score"],
+        ))
+    elif sort == "rate":
+        results.sort(key=lambda item: (
+            item["profile"].get("rateCentavos") is None,
+            item["profile"].get("rateCentavos") or 0,
+            -item["match"]["score"],
+        ))
+    elif sort == "budget":
+        results.sort(key=lambda item: (
+            item["profile"].get("budgetMaxCentavos") is None,
+            -(item["profile"].get("budgetMaxCentavos") or 0),
+            -item["match"]["score"],
+        ))
+    else:
+        results.sort(key=lambda item: (
+            -item["match"]["score"],
+            item["profile"].get("distanceMeters") is None,
+            item["profile"].get("distanceMeters") or 0,
+            item["profile"].get("name") or "",
+        ))
+    return results
+
+
+def _search_suggestions(viewer, params, total, relaxed):
+    """Return short, actionable suggestions for the no-results state."""
+    tips = []
+    role_word = "tutors" if viewer["role"] == "student" else "students"
+    if total == 0:
+        if params["format"]:
+            tips.append(f"Try any format to see more {role_word}")
+        if params["max_distance_meters"] is not None:
+            tips.append("Widen your distance or choose Any distance")
+        if params["availability_slots"]:
+            tips.append("Clear the availability filter")
+        if params["subject_id"]:
+            tips.append("Try a broader subject")
+        if params["q"]:
+            tips.append("Try a shorter keyword")
+        if params["hard_max_rate"] is not None or params["hard_min_budget"] is not None:
+            tips.append(
+                "Raise your budget"
+                if viewer["role"] == "student"
+                else "Lower your rate"
+            )
+        tips.append("Clear a filter and search again")
+    elif total < 3:
+        tips.append("Add more subjects or availability to improve matches")
+    if relaxed:
+        tips.append("Distance was widened to show more matches")
+
+    result = []
+    for tip in tips:
+        if tip not in result:
+            result.append(tip)
+    return result[:4]
+
+
+def _query_echo(params, role):
+    """Echo the effective search criteria back to the client."""
+    return {
+        "q": params["q"] or None,
+        "subjectId": params["subject_id"],
+        "level": params["level"],
+        "format": params["format"],
+        "maxRateCentavos": (
+            params["hard_max_rate"] if role == "student" else None
+        ),
+        "minBudgetCentavos": (
+            params["hard_min_budget"] if role == "tutor" else None
+        ),
+        "availability": params["availability_raw"] or None,
+        "maxDistanceMeters": params["max_distance_meters"],
+        "style": params["style_raw"] or None,
+        "goal": params["goal_raw"] or None,
+        "sort": params["sort"],
+        "page": params["page"],
+        "limit": params["limit"],
+    }
+
+
+def _parse_search_params(role):
+    """Validate every search query parameter in one place."""
+    fields = {}
+    q = (request.args.get("q") or "").strip()[:120]
+    subject_id = (request.args.get("subjectId") or "").strip() or None
+    level = (request.args.get("level") or "").strip() or None
+    requested_format = (request.args.get("format") or "").strip() or None
+    availability_raw = (request.args.get("availability") or "").strip()
+    style_raw = (request.args.get("style") or "").strip()
+    goal_raw = (request.args.get("goal") or "").strip()
+    sort = (request.args.get("sort") or "score").strip().lower()
+
+    if subject_id:
+        exists = db.query_one(
+            "SELECT id FROM subjects WHERE id = %s",
+            (subject_id,),
+        )
+        if not exists:
+            fields["subjectId"] = "Choose a valid subject."
+    if level and level not in PROFILE_LEVELS:
+        fields["level"] = "Choose a valid level."
+    if requested_format and requested_format not in PROFILE_FORMATS:
+        fields["format"] = "Choose a valid format."
+
+    allowed_sorts = (
+        ("score", "distance", "rate")
+        if role == "student"
+        else ("score", "distance", "budget")
+    )
+    if sort not in allowed_sorts:
+        fields["sort"] = "Choose a valid sort order."
+
+    availability_slots, availability_error = _parse_availability_filter(
+        availability_raw
+    )
+    if availability_error:
+        fields["availability"] = availability_error
+    style_filter = _parse_tag_filter(style_raw, STYLE_TAGS, "style", fields)
+    goal_filter = _parse_tag_filter(goal_raw, GOAL_TAGS, "goal", fields)
+
+    hard_max_rate = None
+    hard_min_budget = None
+    if role == "student":
+        hard_max_rate, error = _parse_int_arg(
+            "maxRateCentavos",
+            None,
+            0,
+            10000000,
+        )
+        if error:
+            fields["maxRateCentavos"] = error
+    else:
+        hard_min_budget, error = _parse_int_arg(
+            "minBudgetCentavos",
+            None,
+            0,
+            10000000,
+        )
+        if error:
+            fields["minBudgetCentavos"] = error
+
+    max_distance_meters, error = _parse_int_arg(
+        "maxDistanceMeters",
+        None,
+        0,
+        1000000,
+    )
+    if error:
+        fields["maxDistanceMeters"] = error
+    page, error = _parse_int_arg("page", 1, 1, 1000)
+    if error:
+        fields["page"] = error
+    limit, error = _parse_int_arg("limit", 10, 1, 50)
+    if error:
+        fields["limit"] = error
+
+    return {
+        "q": q,
+        "subject_id": subject_id,
+        "level": level,
+        "format": requested_format,
+        "availability_raw": availability_raw,
+        "availability_slots": availability_slots,
+        "style_raw": style_raw,
+        "style_filter": style_filter,
+        "goal_raw": goal_raw,
+        "goal_filter": goal_filter,
+        "sort": sort,
+        "hard_max_rate": hard_max_rate,
+        "hard_min_budget": hard_min_budget,
+        "max_distance_meters": max_distance_meters,
+        "page": page,
+        "limit": limit,
+    }, fields
+
+
+def _run_search(viewer, params):
+    """Filter, score, sort, and paginate candidates."""
+    candidate_role = "tutor" if viewer["role"] == "student" else "student"
+    candidates = _load_search_candidates(candidate_role)
+    target_slots = params["availability_slots"] or viewer.get("availability") or []
+    viewer["_subject_id"] = params["subject_id"]
+    viewer["_level"] = params["level"]
+
+    def matches(candidate, max_distance_meters):
+        return _candidate_matches(
+            viewer,
+            candidate,
+            params["subject_id"],
+            params["format"],
+            params["hard_max_rate"],
+            params["hard_min_budget"],
+            max_distance_meters,
+            params["availability_slots"],
+            params["q"],
+        )
+
+    filtered = [
+        candidate
+        for candidate in candidates
+        if matches(candidate, params["max_distance_meters"])
+    ]
+    relaxed = []
+    if params["max_distance_meters"] is not None and len(filtered) < 3:
+        wider = [
+            candidate
+            for candidate in candidates
+            if matches(candidate, None)
+        ]
+        if len(wider) > len(filtered):
+            filtered = wider
+            relaxed.append("distance")
+
+    scored = []
+    for candidate in filtered:
+        distance = _distance_meters(viewer, candidate["row"])
+        match = _build_match(
+            viewer,
+            candidate,
+            distance,
+            params["max_distance_meters"],
+            params["hard_max_rate"],
+            params["hard_min_budget"],
+            target_slots,
+            params["style_filter"],
+            params["goal_filter"],
+        )
+        scored.append({
+            "profile": _public_profile(candidate, viewer, distance),
+            "match": match,
+        })
+
+    visible = [
+        item for item in scored
+        if item["match"]["score"] >= 50
+    ]
+    if not visible and scored:
+        visible = scored
+        for item in visible:
+            warning = "Low match score. Try widening your search."
+            if warning not in item["match"]["warnings"]:
+                item["match"]["warnings"].append(warning)
+
+    _sort_results(visible, params["sort"])
+    total = len(visible)
+    start = (params["page"] - 1) * params["limit"]
+    page_results = visible[start:start + params["limit"]]
+    return (
+        total,
+        page_results,
+        relaxed,
+        _search_suggestions(viewer, params, total, relaxed),
+    )
+
+
+def _search_response(expected_role):
+    """Shared implementation for both role-specific search endpoints."""
+    user, viewer = _viewer_profile(session["user_id"])
+    if not user:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+    if user["role"] != expected_role:
+        message = (
+            "Tutors search for students."
+            if expected_role == "student"
+            else "Students search for tutors."
+        )
+        return json_error("FORBIDDEN", message, 403)
+
+    params, fields = _parse_search_params(user["role"])
+    if fields:
+        return validation_error(fields)
+
+    total, results, relaxed, suggestions = _run_search(viewer, params)
+    return jsonify({
+        "query": _query_echo(params, user["role"]),
+        "total": total,
+        "page": params["page"],
+        "limit": params["limit"],
+        "results": results,
+        "relaxedFilters": relaxed,
+        "suggestions": suggestions,
+    })
 
 
 # ============================================================
@@ -1955,6 +3205,108 @@ def upload_my_photo():
 
     log_event("profile_photo_updated", user_id=session["user_id"])
     return jsonify({"photoUrl": photo_url}), 201
+
+
+# ============================================================
+# Search and public profile API
+# ============================================================
+@app.get("/api/search/tutors")
+@login_required
+def search_tutors():
+    """Students search for tutors. Never called automatically by the UI."""
+    return _search_response("student")
+
+
+@app.get("/api/search/students")
+@login_required
+def search_students():
+    """Tutors search for students. Never called automatically by the UI."""
+    return _search_response("tutor")
+
+
+@app.get("/api/profiles/<profile_id>")
+@login_required
+def public_profile(profile_id):
+    """Return the privacy-safe public view of one profile."""
+    raw = str(profile_id or "").strip()
+    if raw.startswith("prof_"):
+        raw = raw[5:]
+    try:
+        profile_id_value = int(raw)
+    except (TypeError, ValueError):
+        return json_error("NOT_FOUND", "Profile not found.", 404)
+
+    row = db.query_one(
+        """
+        SELECT p.id, p.user_id, p.photo_url, p.bio, p.headline, p.status,
+               p.format, p.area_barangay, p.area_city, p.coarse_geohash,
+               p.rate_centavos, p.budget_min_centavos, p.budget_max_centavos,
+               p.currency, p.style_tags, p.goal_tags, p.completeness,
+               p.onboarding_completed_at, p.verified_at, p.response_time_mins,
+               p.last_active_at,
+               u.id AS account_id, u.role AS account_role,
+               u.name AS account_name, u.last_login_at
+        FROM profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE p.id = %s AND u.status = 'active'
+        """,
+        (profile_id_value,),
+    )
+    if not row:
+        return json_error("NOT_FOUND", "Profile not found.", 404)
+
+    subject_rows = db.query_all(
+        """
+        SELECT ps.subject_id, ps.level, ps.kind, s.name, s.category
+        FROM profile_subjects ps
+        JOIN subjects s ON s.id = ps.subject_id
+        WHERE ps.profile_id = %s
+        ORDER BY s.category, s.name
+        """,
+        (profile_id_value,),
+    )
+    availability_rows = db.query_all(
+        """
+        SELECT day_of_week, start_time, end_time
+        FROM availability_slots
+        WHERE profile_id = %s
+        ORDER BY day_of_week, start_time
+        """,
+        (profile_id_value,),
+    )
+
+    candidate = {
+        "row": row,
+        "user": {
+            "id": row["account_id"],
+            "role": row["account_role"],
+            "name": row["account_name"],
+            "last_login_at": row["last_login_at"],
+        },
+        "subjects": [
+            {
+                "id": subject["subject_id"],
+                "name": subject["name"],
+                "level": subject["level"],
+                "kind": subject["kind"],
+            }
+            for subject in subject_rows
+        ],
+        "availability": [
+            {
+                "day": DAYS[slot["day_of_week"] - 1],
+                "start": _time_text(slot["start_time"]),
+                "end": _time_text(slot["end_time"]),
+            }
+            for slot in availability_rows
+            if 1 <= slot["day_of_week"] <= 7
+        ],
+    }
+    _user, viewer = _viewer_profile(session["user_id"])
+    distance = _distance_meters(viewer, row)
+    return jsonify({
+        "profile": _public_profile(candidate, viewer, distance),
+    })
 
 
 # ============================================================
