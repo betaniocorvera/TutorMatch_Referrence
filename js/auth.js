@@ -6,7 +6,6 @@
 (function (global) {
   'use strict';
 
-  const SENT_KEY = 'tutormatch_sent_requests';
   const LEGACY_USER_KEY = 'tutormatch_users';
   const LEGACY_SESSION_KEY = 'tutormatch_session';
 
@@ -14,6 +13,8 @@
   let profileCache = null;
   let csrfToken = '';
   let csrfPromise = null;
+  let sentRequestsCache = [];
+  let sentRequestIds = new Set();
 
   class ApiError extends Error {
     constructor(message, options = {}) {
@@ -22,14 +23,6 @@
       this.code = options.code || 'ERROR';
       this.status = options.status || 0;
       this.fields = options.fields || {};
-    }
-  }
-
-  function safeParse(value, fallback) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return fallback;
     }
   }
 
@@ -74,6 +67,8 @@
   function clearSession() {
     currentUser = null;
     profileCache = null;
+    sentRequestsCache = [];
+    sentRequestIds = new Set();
   }
 
   function invalidateCsrf() {
@@ -336,35 +331,173 @@
     await apiFetch('/api/auth/logout', { method: 'POST' });
     currentUser = null;
     profileCache = null;
+    sentRequestsCache = [];
+    sentRequestIds = new Set();
     if (options.redirect !== false) {
       global.location.href = 'index.html';
     }
   }
 
+  function queryString(params = {}) {
+    const search = new URLSearchParams();
+    Object.keys(params).forEach((key) => {
+      const value = params[key];
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, value);
+      }
+    });
+    const text = search.toString();
+    return text ? '?' + text : '';
+  }
+
+  async function getRequests(params = {}) {
+    return apiFetch('/api/requests' + queryString(params));
+  }
+
+  async function loadSentRequests() {
+    const data = await getRequests({ box: 'outgoing', limit: 50 });
+    sentRequestsCache = Array.isArray(data.requests) ? data.requests : [];
+    sentRequestIds = new Set(
+      sentRequestsCache
+        .filter((item) => item.status === 'pending' || item.status === 'accepted')
+        .map((item) => String(item.to && item.to.id))
+    );
+    return sentRequestsCache;
+  }
+
   function getSentRequests() {
-    const list = safeParse(localStorage.getItem(SENT_KEY), []);
-    return Array.isArray(list) ? list : [];
+    return sentRequestsCache.slice();
   }
 
   function hasSentRequest(id) {
-    return getSentRequests().some((item) => item.id === id);
+    return sentRequestIds.has(String(id));
   }
 
-  function saveSentRequest(person) {
-    if (!person || !person.id || hasSentRequest(person.id)) {
-      return getSentRequests();
+  function rememberSentRequest(request) {
+    if (!request) return;
+    const index = sentRequestsCache.findIndex((item) => item.id === request.id);
+    if (index === -1) sentRequestsCache.unshift(request);
+    else sentRequestsCache[index] = request;
+
+    const personId = String(request.to && request.to.id);
+    if (request.status === 'pending' || request.status === 'accepted') {
+      sentRequestIds.add(personId);
+    } else {
+      sentRequestIds.delete(personId);
     }
-    const list = getSentRequests();
-    list.push({
-      id: person.id,
-      name: person.name,
-      role: person.role,
-      subjects: person.subjects || [],
-      sentAt: Date.now(),
-      status: 'pending'
+  }
+
+  async function createRequest(payload) {
+    const data = await apiFetch('/api/requests', {
+      method: 'POST',
+      body: payload
     });
-    localStorage.setItem(SENT_KEY, JSON.stringify(list));
-    return list;
+    rememberSentRequest(data.request);
+    return data;
+  }
+
+  async function updateRequest(id, action) {
+    const data = await apiFetch('/api/requests/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: { action }
+    });
+    rememberSentRequest(data.request);
+    return data;
+  }
+
+  async function getConversations(params = {}) {
+    return apiFetch('/api/conversations' + queryString(params));
+  }
+
+  async function getConversation(id) {
+    return apiFetch('/api/conversations/' + encodeURIComponent(id));
+  }
+
+  async function getMessages(id, params = {}) {
+    return apiFetch(
+      '/api/conversations/' + encodeURIComponent(id) + '/messages' + queryString(params)
+    );
+  }
+
+  async function sendMessage(id, body) {
+    return apiFetch('/api/conversations/' + encodeURIComponent(id) + '/messages', {
+      method: 'POST',
+      body: { type: 'text', body }
+    });
+  }
+
+  async function markConversationRead(id, lastMessageId) {
+    return apiFetch('/api/conversations/' + encodeURIComponent(id) + '/read', {
+      method: 'PATCH',
+      body: lastMessageId ? { lastMessageId } : {}
+    });
+  }
+
+  async function getNotifications(params = {}) {
+    return apiFetch('/api/notifications' + queryString(params));
+  }
+
+  async function markNotificationRead(id) {
+    return apiFetch('/api/notifications/' + encodeURIComponent(id) + '/read', {
+      method: 'PATCH',
+      body: {}
+    });
+  }
+
+  async function markAllNotificationsRead() {
+    return apiFetch('/api/notifications/read-all', {
+      method: 'PATCH',
+      body: {}
+    });
+  }
+
+  async function getSessions(params = {}) {
+    return apiFetch('/api/sessions' + queryString(params));
+  }
+
+  async function createSession(payload) {
+    return apiFetch('/api/sessions', {
+      method: 'POST',
+      body: payload
+    });
+  }
+
+  async function updateSession(id, payload) {
+    return apiFetch('/api/sessions/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: payload
+    });
+  }
+
+  async function reportUser(payload) {
+    return apiFetch('/api/reports', {
+      method: 'POST',
+      body: payload
+    });
+  }
+
+  async function blockUser(id) {
+    return apiFetch('/api/blocks/' + encodeURIComponent(id), {
+      method: 'POST',
+      body: {}
+    });
+  }
+
+  async function unblockUser(id) {
+    return apiFetch('/api/blocks/' + encodeURIComponent(id), {
+      method: 'DELETE'
+    });
+  }
+
+  async function getBlocks() {
+    return apiFetch('/api/blocks');
+  }
+
+  async function trackEvent(name, payload = {}) {
+    return apiFetch('/api/events', {
+      method: 'POST',
+      body: { name, payload }
+    });
   }
 
   function getProfileCompleteness() {
@@ -404,9 +537,29 @@
     forgotPassword,
     resetPassword,
     logout,
+    getRequests,
+    loadSentRequests,
     getSentRequests,
     hasSentRequest,
-    saveSentRequest,
+    rememberSentRequest,
+    createRequest,
+    updateRequest,
+    getConversations,
+    getConversation,
+    getMessages,
+    sendMessage,
+    markConversationRead,
+    getNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    getSessions,
+    createSession,
+    updateSession,
+    reportUser,
+    blockUser,
+    unblockUser,
+    getBlocks,
+    trackEvent,
     getProfileCompleteness,
     setProfileCompleteness
   };

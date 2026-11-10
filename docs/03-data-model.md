@@ -1,13 +1,13 @@
 # TutorMatch A.I. — Data Model
 
-**Phase:** 1 — Foundations  
-**Status:** Draft v0.1  
-**Database target:** PostgreSQL (Supabase or managed Postgres)  
-**Last updated:** 2026-10-27
+**Phase:** 4 — Trust, safety, and evaluation
+**Status:** Implemented in MySQL for the capstone build
+**Database target:** MySQL 8 (`schema.sql`)
+**Last updated:** 2026-11-10
 
 ## 1. Purpose
 
-This document defines the entities, relationships, constraints, privacy rules, and matching inputs for TutorMatch A.I. It is the source of truth for the API contract and the future database schema.
+This document defines the entities, relationships, constraints, privacy rules, and matching inputs for TutorMatch A.I. It is the source of truth for the API contract and the MySQL schema in `schema.sql`.
 
 ## 2. Entity relationship diagram
 
@@ -34,6 +34,8 @@ erDiagram
 ## 3. Tables
 
 API responses join `users.name`, `users.email`, and `users.role` onto profile records. The `profiles` table stores profile-specific fields only.
+
+The tables below keep the original conceptual Postgres types (`uuid`, `timestamptz`, `jsonb`) for readability. The implemented MySQL schema in `schema.sql` uses `BIGINT UNSIGNED` IDs, `DATETIME`, `JSON`, and `ENUM`.
 
 ### 3.1 `users`
 
@@ -131,7 +133,7 @@ The API maps `day_of_week` to `mon`–`sun`; the database stores 1–7, with 1 =
 Constraints:
 - `from_user_id <> to_user_id`.
 - Roles must be opposite; enforce in the API.
-- Only one `pending` request per pair; enforce with a partial unique index.
+- Only one `pending` request per pair. MySQL has no partial unique index, so the API writes a nullable `pending_key` (`from-to`) while pending and clears it on every status change; a unique index on `pending_key` enforces the rule.
 - Request limit and rate limit are enforced in the API.
 
 ### 3.7 `conversations`
@@ -208,6 +210,8 @@ Unique constraint: `(session_id, reviewer_id)`. Only completed sessions can be r
 | `created_at` | timestamptz | Default now |
 | `reviewed_at` | timestamptz | Nullable |
 
+Reports are private to the reporter and moderation code. A report is rejected when the pair has an active block. Details are capped at 1,000 characters.
+
 ### 3.12 `blocks`
 
 | Column | Type | Notes |
@@ -217,6 +221,8 @@ Unique constraint: `(session_id, reviewer_id)`. Only completed sessions can be r
 | `created_at` | timestamptz | Default now |
 
 Primary key: `(blocker_id, blocked_id)`. A user cannot block themselves.
+
+A block is directional in storage but symmetric in effect: it hides both users from each other in search and public-profile access, marks shared conversations `blocked` and read-only, and cancels pending requests between the pair. Unblocking reopens shared conversations only when the reverse block is absent.
 
 ### 3.13 `saved_profiles` (V1.5)
 
@@ -234,7 +240,7 @@ Primary key: `(user_id, profile_id)`. A user cannot save themselves.
 |---|---|---|
 | `id` | uuid | Primary key |
 | `user_id` | uuid | FK to `users` |
-| `type` | text | `request_received`, `request_accepted`, `message_received`, `session_proposed`, `session_accepted` |
+| `type` | text | `request_received`, `request_accepted`, `request_declined`, `message_received`, `session_proposed`, `session_accepted`, `session_declined`, `session_rescheduled`, `session_cancelled`, `session_completed` |
 | `payload` | jsonb | IDs and display data |
 | `read_at` | timestamptz | Null until read |
 | `created_at` | timestamptz | Default now |
@@ -251,7 +257,9 @@ Index: `(user_id, read_at)`.
 | `payload` | jsonb | Non-sensitive metadata |
 | `created_at` | timestamptz | Default now |
 
-Never store emails, passwords, message bodies, or exact locations in this table.
+Never store emails, passwords, message bodies, or exact locations in this table. The Flask layer drops forbidden keys at every nesting level, truncates strings, caps payloads at 4,000 bytes, and records events on a best-effort basis so analytics can never block a user action.
+
+Implemented event names: `search_submitted`, `result_clicked`, `profile_viewed`, `request_sent`, `request_accepted`, `request_declined`, `request_cancelled`, `message_sent`, `session_proposed`, `session_accepted`, `session_declined`, `session_rescheduled`, `session_completed`, `session_cancelled`, `report_submitted`, `block_created`, and `block_removed`.
 
 ### 3.16 `verification_requests` (V1.5)
 
@@ -274,7 +282,7 @@ Never store emails, passwords, message bodies, or exact locations in this table.
 - `profile_subjects(profile_id)` for profile loading.
 - `availability_slots(profile_id, day_of_week)` for overlap checks.
 - `match_requests(to_user_id, status)` and `(from_user_id, status)`.
-- Partial unique index on pending requests for `(from_user_id, to_user_id)`.
+- Unique `match_requests.pending_key` while a request is pending; the API clears it when the status changes.
 - `conversations(request_id)` unique.
 - `messages(conversation_id, created_at)`.
 - `session_proposals(conversation_id, starts_at)`.
@@ -392,17 +400,19 @@ Pair score:
 
 ### 7.6 Evaluation
 
-For the capstone defense, compare KNN ranking against:
+For the capstone defense, compare the current weighted ranker against:
 
 - A subject-only baseline.
-- A random baseline.
-- A popularity baseline.
+- A random baseline (fixed seed).
+- A popularity baseline (request counts, then profile completeness).
 
-Measure precision@k with a small hand-labelled set, plus real interaction metrics such as request acceptance rate and session completion rate. Log search and request events from day one.
+Measure precision@1, precision@3, precision@5, and MRR on a small hand-labelled set, plus real interaction metrics such as request acceptance rate and session completion rate. The offline harness lives in `evaluation.py` with labels in `mock/evaluation_labels.json`; see `docs/04-evaluation.md`.
+
+The harness calls the real ranker with `soft_subject=True`, so the current model and all baselines rank the same compatible demo candidate pool. The requested subject still influences the current score; it just does not shrink the pool before comparison. Evaluation output is printed to the terminal and is only written to disk when `--json` is supplied.
 
 ## 8. Seed data plan
 
-- 20–30 tutor profiles and 10–15 student profiles.
+- A small reproducible demo set: four tutor and four student profiles, all using `@example.test` emails.
 - Fictional names, real Cabadbaran barangays, no real contact information.
 - Mix of online-only, in-person, and both.
 - Mix of complete and incomplete profiles to demonstrate cold start.
@@ -412,8 +422,8 @@ Measure precision@k with a small hand-labelled set, plus real interaction metric
 
 ## 9. Open data decisions
 
-1. Use Supabase Auth or custom auth with Node/Express?
-2. Store photos in Supabase Storage, Cloudinary, or local disk for the demo?
-3. Add Cebuano labels as a translation layer or duplicate content?
-4. Add reviews in V1 or V1.5?
-5. Add GCash/Maya payments later, or keep payments off-platform?
+1. Reviews remain V1.5; the `reviews` table is defined but not exposed in the Phase 4 UI.
+2. Saved profiles remain V1.5.
+3. Photos use the existing profile photo endpoint and local demo storage.
+4. Cebuano labels are deferred to a translation layer; V1 ships English copy.
+5. Payments stay off-platform in V1; GCash/Maya is a later integration decision.

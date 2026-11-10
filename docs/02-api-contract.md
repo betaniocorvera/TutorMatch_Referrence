@@ -1,20 +1,20 @@
 # TutorMatch A.I. — API Contract
 
-**Phase:** 1–2 — Foundations + Search
-**Status:** Implemented for auth, onboarding, profiles, and search
+**Phase:** 1–4 — Foundations, Search, Messaging, Trust & Evaluation
+**Status:** Implemented for auth, onboarding, profiles, search, requests, chat, sessions, safety, notifications, analytics, and evaluation
 **Base URL:** `/api`
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-10
 
 > Implementation note: the Flask app uses secure session cookies plus CSRF tokens instead of Bearer tokens. Database-backed IDs are integers; the examples below keep the original opaque mock IDs. Response shapes and privacy rules are unchanged.
 
 ## 1. Purpose
 
-This contract lets the UI be built against realistic data before the backend exists. The mock layer and the future backend must return the same shapes. If a screen needs data that is not in this document, update this contract first.
+This contract lets the UI be built against realistic data before the backend exists. The mock layer and the Flask/MySQL backend must return the same shapes. If a screen needs data that is not in this document, update this contract first.
 
 ## 2. Conventions
 
 - JSON request and response bodies, except photo upload which uses `multipart/form-data`.
-- Authentication uses `Authorization: Bearer <token>` in production. The mock layer accepts `Bearer mock-student-001` and `Bearer mock-tutor-001`.
+- Authentication uses Flask secure session cookies plus CSRF tokens. The historical mock layer also accepts `Bearer mock-student-001` and `Bearer mock-tutor-001`; those tokens are not valid against the real backend.
 - IDs are opaque strings with prefixes: `usr_`, `prof_`, `sub_`, `req_`, `conv_`, `msg_`, `ses_`, `rev_`, `rep_`, `notif_`.
 - Timestamps are ISO 8601 UTC strings: `2026-10-27T08:30:00Z`.
 - Availability is stored in the `Asia/Manila` timezone and returned as `day`, `start`, `end` with `HH:mm` values.
@@ -605,6 +605,9 @@ Returns conversation metadata, participants, request status, and the latest sess
   "conversation": {
     "id": "conv_001",
     "status": "active",
+    "blockedByMe": false,
+    "blockedByOther": false,
+    "readOnly": false,
     "request": {
       "id": "req_002",
       "status": "accepted",
@@ -620,10 +623,14 @@ Returns conversation metadata, participants, request status, and the latest sess
       "startsAt": "2026-10-29T11:00:00Z",
       "durationMins": 60,
       "format": "online"
-    }
+    },
+    "lastMessageAt": "2026-10-27T08:35:00Z",
+    "createdAt": "2026-10-27T08:10:00Z"
   }
 }
 ```
+
+`blockedByMe`, `blockedByOther`, and `readOnly` are viewer-specific. A conversation is read-only when its status is not `active` or either participant has blocked the other.
 
 ### GET `/api/conversations/:id/messages?before=msg_003&limit=30`
 
@@ -746,13 +753,15 @@ Response `201`:
     "id": "ses_001",
     "conversationId": "conv_001",
     "proposedBy": "usr_tutor_004",
+    "proposedByName": "Kevin Lumactod",
     "startsAt": "2026-10-29T11:00:00Z",
     "durationMins": 60,
     "format": "online",
     "location": "Google Meet link to be shared in chat",
     "note": "Arrays and loops practice.",
     "status": "proposed",
-    "createdAt": "2026-10-27T08:30:00Z"
+    "createdAt": "2026-10-27T08:30:00Z",
+    "respondedAt": null
   }
 }
 ```
@@ -760,9 +769,13 @@ Response `201`:
 Rules:
 - `startsAt` must be in the future.
 - Duration: 30, 60, 90, or 120 minutes.
-- Either participant can propose.
+- Either participant can propose, but only one session can wait for a response at a time.
+- The conversation must be `active`; blocked conversations cannot receive new proposals.
 - Only the other participant can accept or decline.
-- A system message is created when a session is proposed, accepted, declined, or completed.
+- Either participant can reschedule or cancel while the session is still open.
+- Only an `accepted` session can be completed.
+- A system message is created when a session is proposed, accepted, declined, rescheduled, cancelled, or completed.
+- Proposing and responding create in-app notifications and non-sensitive analytics events.
 
 ### GET `/api/sessions?from=2026-10-27&to=2026-11-03`
 
@@ -775,14 +788,22 @@ Response `200`:
       "id": "ses_001",
       "conversationId": "conv_001",
       "status": "proposed",
+      "proposedBy": "usr_tutor_004",
+      "proposedByName": "Kevin Lumactod",
       "startsAt": "2026-10-29T11:00:00Z",
       "durationMins": 60,
       "format": "online",
+      "location": "Google Meet link to be shared in chat",
+      "note": null,
+      "respondedAt": null,
+      "createdAt": "2026-10-27T08:30:00Z",
       "otherUser": { "id": "usr_tutor_004", "name": "Kevin Lumactod" }
     }
   ]
 }
 ```
+
+`from` and `to` are optional `YYYY-MM-DD` dates. The endpoint returns up to 100 visible sessions for the current user.
 
 ### PATCH `/api/sessions/:id`
 
@@ -793,6 +814,14 @@ Response `200`:
 Allowed actions: `accept`, `decline`, `reschedule`, `cancel`, `complete`.
 
 For `reschedule`, include `startsAt` and optionally `durationMins`.
+
+Response `200`:
+
+```json
+{ "session": { "id": "ses_001", "status": "accepted", "respondedAt": "2026-10-27T08:40:00Z" } }
+```
+
+Returns `403 FORBIDDEN` when the proposer tries to accept or decline their own proposal, `403 BLOCKED` when the pair has an active block, and `409 CONFLICT` when the session has already moved to another state.
 
 ## 11. Saved profiles (V1.5)
 
@@ -830,6 +859,9 @@ Response `200`:
 {
   "total": 1,
   "unread": 1,
+  "unreadCount": 1,
+  "page": 1,
+  "limit": 20,
   "notifications": [
     {
       "id": "notif_001",
@@ -854,7 +886,7 @@ Response `204`.
 
 Response `204`.
 
-V1 can derive notifications from requests and messages without a separate push service.
+Notification types implemented in V1: `request_received`, `request_accepted`, `request_declined`, `message_received`, `session_proposed`, `session_accepted`, `session_declined`, `session_rescheduled`, `session_cancelled`, and `session_completed`. Notifications are stored in MySQL; no push service is required. `unread` and `unreadCount` are aliases for the same total so older clients remain compatible.
 
 ## 13. Safety
 
@@ -875,17 +907,51 @@ Response `201`:
 { "reportId": "rep_001", "status": "open" }
 ```
 
+Valid reasons: `harassment`, `spam`, `impersonation`, `inappropriate`, `no_show`, and `other`. Details are optional and limited to 1,000 characters. A user cannot report themselves or someone they have blocked. `conversationId` is optional, but when supplied it must be a shared conversation and `reportedUserId` must be the other participant.
+
+### POST `/api/conversations/:id/report`
+
+Convenience endpoint for the chat safety panel. It reports the other participant and fills in `conversationId` automatically. Body:
+
+```json
+{ "reason": "harassment", "details": "Optional context." }
+```
+
+Response `201` with the same shape as `POST /api/reports`.
+
 ### POST `/api/blocks/:userId`
 
-Response `204`.
+Response `204`. Idempotent when the block already exists. Blocking:
+
+- Hides both users from each other in search and public-profile access.
+- Marks every shared conversation `blocked` and read-only.
+- Cancels pending requests between the pair.
+- Pauses session actions until the block is removed.
+- Records a non-sensitive `block_created` analytics event.
 
 ### DELETE `/api/blocks/:userId`
 
-Response `204`.
+Response `204`. Removes the current user's block. Shared conversations reopen only when the other user has not also blocked the current user.
 
 ### GET `/api/blocks`
 
-Returns the current user's blocked list. Never expose this list to other users.
+Returns only the current user's blocked list:
+
+```json
+{
+  "blocks": [
+    {
+      "userId": "usr_tutor_004",
+      "name": "Kevin Lumactod",
+      "role": "tutor",
+      "photoUrl": null,
+      "blockedAt": "2026-10-27T09:00:00Z"
+    }
+  ]
+}
+```
+
+Never expose this list to other users.
 
 ## 14. Analytics events
 
@@ -908,19 +974,54 @@ Used for capstone evaluation and product analytics.
 }
 ```
 
-Suggested events:
+Response `204` with no body. Invalid event names return `400 VALIDATION_ERROR`.
+
+Implemented event names:
 - `search_submitted`
 - `result_clicked`
 - `profile_viewed`
 - `request_sent`
 - `request_accepted`
 - `request_declined`
+- `request_cancelled`
 - `message_sent`
 - `session_proposed`
+- `session_accepted`
+- `session_declined`
+- `session_rescheduled`
 - `session_completed`
+- `session_cancelled`
 - `report_submitted`
+- `block_created`
+- `block_removed`
 
-Do not include passwords, emails, or message bodies in analytics payloads.
+The server sanitizes payloads before insert. Sensitive keys such as `email`, `password`, `birthdate`, `body`, `message`, `token`, `address`, `latitude`, `longitude`, `coarse_geohash`, and verification documents are dropped at every nesting level. Strings are truncated, and payloads larger than 4,000 bytes are rejected. Do not include passwords, emails, message bodies, or exact locations in analytics payloads.
+
+### GET `/api/analytics/summary`
+
+Admin-only aggregate metrics for the capstone evaluation. Returns `403 FORBIDDEN` for students and tutors.
+
+Response `200`:
+
+```json
+{
+  "generatedAt": "2026-10-27T09:10:00Z",
+  "users": { "student": 8, "tutor": 7, "admin": 1 },
+  "requests": {
+    "byStatus": { "pending": 12, "accepted": 5, "declined": 2 },
+    "total": 19,
+    "acceptanceRate": 0.2632
+  },
+  "sessions": {
+    "byStatus": { "proposed": 2, "completed": 4 },
+    "total": 6,
+    "completionRate": 0.6667
+  },
+  "reports": { "byStatus": { "open": 1 }, "total": 1 },
+  "messages": { "total": 42 },
+  "analyticsEventsLast30Days": { "search_submitted": 30, "message_sent": 42 }
+}
+```
 
 ## 15. Error codes
 
@@ -940,6 +1041,8 @@ Do not include passwords, emails, or message bodies in analytics payloads.
 | 500 | `INTERNAL` | Unexpected server error |
 
 ## 16. Mock behavior
+
+Phase 3 and Phase 4 use the Flask/MySQL backend. This section documents the original Phase 1 mock contract and is kept for reference; the mock layer is not used by the Phase 4 UI.
 
 The mock layer should behave like a real API:
 
@@ -962,19 +1065,19 @@ Public profile responses must never include:
 - Verification documents
 - Reports or block list
 
-Location responses include barangay, city, and rounded distance only. Chat messages are returned only to the two participants. Admin endpoints are authenticated and role-restricted.
+Location responses include barangay, city, and rounded distance only. Chat messages are returned only to the two participants. Reports and blocks are visible only to their owner and to server-side moderation code. Analytics payloads are sanitized before insert and never include emails, passwords, message bodies, or exact locations. Admin endpoints are authenticated and role-restricted.
 
 ## 18. Mapping to the backend
 
-| Contract area | Future tables |
+| Contract area | Implemented tables / services |
 |---|---|
-| Auth | `users`, `sessions` |
+| Auth | `users`, Flask sessions |
 | Profiles | `profiles`, `subjects`, `profile_subjects`, `availability_slots` |
-| Search | `profiles`, `profile_subjects`, `availability_slots` + KNN service |
+| Search | `profiles`, `profile_subjects`, `availability_slots`, weighted in-process ranker |
 | Requests | `match_requests`, `conversations` |
 | Messages | `conversations`, `messages` |
 | Sessions | `session_proposals` |
-| Saved | `saved_profiles` |
+| Saved | `saved_profiles` (V1.5) |
 | Notifications | `notifications` |
 | Safety | `reports`, `blocks` |
 | Analytics | `analytics_events` |

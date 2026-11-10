@@ -62,6 +62,11 @@
           <span>Messages</span>
           <span id="messages-badge" class="side-badge hidden" aria-label="Unread messages">0</span>
         </a>
+        <a href="#notifications" class="side-link" data-section="notifications">
+          <i data-lucide="bell"></i>
+          <span>Notifications</span>
+          <span id="notifications-badge" class="side-badge hidden" aria-label="Unread notifications">0</span>
+        </a>
       </nav>
 
       <div class="sidebar-user">
@@ -278,14 +283,114 @@
 
         <!-- ============ MESSAGES ============ -->
         <section id="section-messages" class="app-section hidden" data-section="messages" aria-labelledby="messages-title">
-          <div class="page-head">
-            <h1 id="messages-title">Messages</h1>
-            <p>Requests you send from Search appear here.</p>
+          <div class="page-head messages-head">
+            <div>
+              <h1 id="messages-title">Messages</h1>
+              <p>Accept an incoming request to unlock chat. Conversations stay locked until then.</p>
+            </div>
+            <button type="button" class="btn-outline messages-refresh" id="messages-refresh">
+              <i data-lucide="refresh-cw"></i>
+              <span>Refresh</span>
+            </button>
           </div>
 
-          <div class="panel-card">
-            <h2 class="text-base font-extrabold text-ink">Sent requests</h2>
-            <div id="sent-requests" class="sent-list"></div>
+          <div class="messages-shell">
+            <div class="panel-card messages-sidebar">
+              <div class="messages-tabs" role="tablist" aria-label="Message filters">
+                <button type="button" class="messages-tab active" data-messages-tab="incoming" role="tab" aria-selected="true">
+                  Incoming <span class="tab-count" id="messages-incoming-count">0</span>
+                </button>
+                <button type="button" class="messages-tab" data-messages-tab="outgoing" role="tab" aria-selected="false">
+                  Outgoing <span class="tab-count" id="messages-outgoing-count">0</span>
+                </button>
+                <button type="button" class="messages-tab" data-messages-tab="conversations" role="tab" aria-selected="false">
+                  Chats <span class="tab-count" id="messages-conversation-count">0</span>
+                </button>
+              </div>
+              <div id="messages-list" class="messages-list" aria-live="polite"></div>
+            </div>
+
+            <div class="panel-card chat-panel" id="chat-panel">
+              <div id="chat-empty" class="chat-empty">
+                <div class="empty-icon"><i data-lucide="messages-square"></i></div>
+                <h2>No conversation open</h2>
+                <p>Accept an incoming request to start a conversation. Chat stays locked until then.</p>
+              </div>
+
+              <div id="chat-thread" class="chat-thread hidden">
+                <div class="chat-head">
+                  <div class="chat-head-main">
+                    <h2 id="chat-title">Conversation</h2>
+                    <p id="chat-subtitle"></p>
+                  </div>
+                  <div class="chat-head-actions">
+                    <span id="chat-status" class="status-chip"></span>
+                    <button type="button" class="btn-outline chat-action" id="chat-propose">
+                      Propose session
+                    </button>
+                    <button type="button" class="btn-outline chat-action" id="chat-report">
+                      Report
+                    </button>
+                    <button type="button" class="btn-outline chat-action" id="chat-block">
+                      Block
+                    </button>
+                  </div>
+                </div>
+                <div id="session-card" class="session-card hidden" aria-live="polite"></div>
+                <div id="chat-notice" class="chat-notice hidden" role="status"></div>
+                <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+                <form id="chat-form" class="chat-form">
+                  <label class="sr-only" for="chat-input">Message</label>
+                  <textarea id="chat-input" rows="2" maxlength="2000" placeholder="Write a message..." required></textarea>
+                  <button type="submit" class="btn-dark-sm" id="chat-send">Send</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ NOTIFICATIONS ============ -->
+        <section id="section-notifications" class="app-section hidden" data-section="notifications" aria-labelledby="notifications-title">
+          <div class="page-head notifications-head">
+            <div>
+              <h1 id="notifications-title">Notifications</h1>
+              <p>Requests, messages, session updates, and safety notices in one place.</p>
+            </div>
+            <div class="notifications-head-actions">
+              <button type="button" class="btn-outline" id="notifications-refresh">
+                <i data-lucide="refresh-cw"></i>
+                <span>Refresh</span>
+              </button>
+              <button type="button" class="btn-dark-sm" id="notifications-mark-all">
+                Mark all read
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card notifications-panel">
+            <div class="notifications-toolbar">
+              <div class="notification-filters" role="tablist" aria-label="Notification filters">
+                <button type="button" class="notification-filter active" data-notification-filter="all" role="tab" aria-selected="true">
+                  All
+                </button>
+                <button type="button" class="notification-filter" data-notification-filter="unread" role="tab" aria-selected="false">
+                  Unread
+                </button>
+              </div>
+              <p class="notifications-unread-label" id="notifications-unread-label"></p>
+            </div>
+            <div id="notifications-list" class="notifications-list" aria-live="polite"></div>
+          </div>
+
+          <div class="panel-card blocked-panel">
+            <div class="blocked-head">
+              <div>
+                <h2>Blocked accounts</h2>
+                <p>Blocked people cannot request, message, or appear in your search results.</p>
+              </div>
+              <span class="tab-count" id="blocked-count">0</span>
+            </div>
+            <div id="blocked-list" class="blocked-list"></div>
           </div>
         </section>
       </main>
@@ -309,6 +414,105 @@
     </aside>
   </div>
 
+  <!-- ============ SESSION PROPOSAL DIALOG ============ -->
+  <div id="session-dialog" class="modal" data-open="false" role="dialog" aria-modal="true" aria-labelledby="session-dialog-title">
+    <div class="modal-backdrop" data-close-session></div>
+    <div class="modal-card" tabindex="-1">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Tutoring plan</p>
+          <h2 id="session-dialog-title">Propose a session</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-session aria-label="Close session form">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+      <form id="session-form" class="modal-form">
+        <label class="modal-field">
+          <span>Date and time</span>
+          <input type="datetime-local" id="session-starts" required />
+        </label>
+        <div class="modal-grid">
+          <label class="modal-field">
+            <span>Duration</span>
+            <select id="session-duration">
+              <option value="30">30 minutes</option>
+              <option value="60" selected>60 minutes</option>
+              <option value="90">90 minutes</option>
+              <option value="120">120 minutes</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>Format</span>
+            <select id="session-format">
+              <option value="online">Online</option>
+              <option value="in_person">In-person</option>
+              <option value="both">Online or in-person</option>
+            </select>
+          </label>
+        </div>
+        <label class="modal-field">
+          <span>Location or meeting note</span>
+          <input type="text" id="session-location" maxlength="200"
+                 placeholder="Barangay or meeting link" />
+        </label>
+        <label class="modal-field">
+          <span>Note</span>
+          <textarea id="session-note" rows="3" maxlength="500"
+                    placeholder="What should you focus on?"></textarea>
+        </label>
+        <p id="session-error" class="modal-error" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-outline" data-close-session>Cancel</button>
+          <button type="submit" class="btn-dark-sm" id="session-submit">Send proposal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ REPORT DIALOG ============ -->
+  <div id="report-dialog" class="modal" data-open="false" role="dialog" aria-modal="true" aria-labelledby="report-dialog-title">
+    <div class="modal-backdrop" data-close-report></div>
+    <div class="modal-card" tabindex="-1">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Safety</p>
+          <h2 id="report-dialog-title">Report this person</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-report aria-label="Close report form">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+      <form id="report-form" class="modal-form">
+        <label class="modal-field">
+          <span>Reason</span>
+          <select id="report-reason" required>
+            <option value="harassment">Harassment</option>
+            <option value="spam">Spam</option>
+            <option value="impersonation">Impersonation</option>
+            <option value="inappropriate">Inappropriate behavior</option>
+            <option value="no_show">Did not attend a session</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          <span>Details <em>(optional)</em></span>
+          <textarea id="report-details" rows="4" maxlength="1000"
+                    placeholder="Tell us what happened."></textarea>
+        </label>
+        <label class="modal-check">
+          <input type="checkbox" id="report-also-block" />
+          <span>Also block this person and make this chat read-only.</span>
+        </label>
+        <p id="report-error" class="modal-error" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-outline" data-close-report>Cancel</button>
+          <button type="submit" class="btn-dark-sm" id="report-submit">Submit report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" data-show="false"></div>
 
@@ -317,6 +521,7 @@
   <script src="js/search.js"></script>
   <script src="js/profile.js"></script>
   <script src="js/messages.js"></script>
+  <script src="js/notifications.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

@@ -13,7 +13,7 @@
     if (!session) return;
 
     const $ = (sel) => document.querySelector(sel);
-    const sections = ['search', 'profile', 'messages'];
+    const sections = ['search', 'profile', 'messages', 'notifications'];
     const sidebar = $('#sidebar');
     const scrim = $('#sidebar-scrim');
     const openButton = $('#sidebar-open');
@@ -82,6 +82,9 @@
 
       if (name === 'profile' && global.TutorMatchProfile) global.TutorMatchProfile.render();
       if (name === 'messages' && global.TutorMatchMessages) global.TutorMatchMessages.render();
+      if (name === 'notifications' && global.TutorMatchNotifications) {
+        global.TutorMatchNotifications.render();
+      }
 
       setSidebar(false, { focus: false });
     }
@@ -135,9 +138,14 @@
       }
     });
 
+    // Load outgoing request state once so Search can render the correct
+    // button label without making the search itself automatic.
+    await auth.loadSentRequests().catch(() => {});
+
     if (global.TutorMatchSearch) global.TutorMatchSearch.init();
     if (global.TutorMatchProfile) global.TutorMatchProfile.init();
     if (global.TutorMatchMessages) global.TutorMatchMessages.init();
+    if (global.TutorMatchNotifications) global.TutorMatchNotifications.init();
 
     global.addEventListener('hashchange', handleHash);
     handleHash();

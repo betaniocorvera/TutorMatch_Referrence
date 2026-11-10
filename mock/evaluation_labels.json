@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "version": 1,
+    "description": "Hand-labelled search relevance set for the TutorMatch A.I. capstone evaluation. Every viewer and candidate is a fictional @example.test demo account. A candidate is relevant when the tutor/student can genuinely help with the requested subject at the requested level, based on the demo profile data.",
+    "labels": "Relevance is binary at the candidate level. The offline harness uses soft_subject=True so the current ranker and all baselines see the same compatible @example.test candidate pool; the requested subject still affects the current score.",
+    "pilotArea": "Cabadbaran City, Agusan del Norte"
+  },
+  "queries": [
+    {
+      "id": "student_calculus",
+      "viewer": "ana@example.test",
+      "role": "student",
+      "q": "",
+      "subjectId": "sub_calculus",
+      "level": "college",
+      "format": null,
+      "maxRateCentavos": 40000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "maria@example.test"
+      ],
+      "note": "Ana needs college calculus exam preparation. Maria teaches college calculus."
+    },
+    {
+      "id": "student_physics",
+      "viewer": "ana@example.test",
+      "role": "student",
+      "q": "",
+      "subjectId": "sub_physics",
+      "level": "senior_high",
+      "format": null,
+      "maxRateCentavos": 35000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "johnpaul@example.test"
+      ],
+      "note": "Ana is a Grade 11 STEM student. John Paul teaches senior-high physics."
+    },
+    {
+      "id": "student_programming",
+      "viewer": "ana@example.test",
+      "role": "student",
+      "q": "",
+      "subjectId": "sub_programming",
+      "level": "college",
+      "format": "online",
+      "maxRateCentavos": 45000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "kevin@example.test"
+      ],
+      "note": "Online programming help. Kevin teaches college programming."
+    },
+    {
+      "id": "student_math_senior_high",
+      "viewer": "ana@example.test",
+      "role": "student",
+      "q": "",
+      "subjectId": "sub_mathematics",
+      "level": "senior_high",
+      "format": null,
+      "maxRateCentavos": 40000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "maria@example.test",
+        "johnpaul@example.test"
+      ],
+      "note": "Senior-high math exam preparation. Maria and John Paul both teach senior-high mathematics."
+    },
+    {
+      "id": "student_english",
+      "viewer": "ana@example.test",
+      "role": "student",
+      "q": "",
+      "subjectId": "sub_english",
+      "level": "senior_high",
+      "format": null,
+      "maxRateCentavos": 30000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "angelica@example.test"
+      ],
+      "note": "English writing and reading confidence. Angelica teaches senior-high English."
+    },
+    {
+      "id": "tutor_calculus",
+      "viewer": "maria@example.test",
+      "role": "tutor",
+      "q": "",
+      "subjectId": "sub_calculus",
+      "level": "senior_high",
+      "format": null,
+      "minBudgetCentavos": 30000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "ana@example.test"
+      ],
+      "note": "Maria searches for a student who needs calculus support. Ana lists senior-high calculus."
+    },
+    {
+      "id": "tutor_programming",
+      "viewer": "maria@example.test",
+      "role": "tutor",
+      "q": "",
+      "subjectId": "sub_programming",
+      "level": "college",
+      "format": "online",
+      "minBudgetCentavos": 25000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "mark@example.test"
+      ],
+      "note": "Online Java fundamentals. Mark is a college CS student who needs programming help."
+    },
+    {
+      "id": "tutor_chemistry",
+      "viewer": "maria@example.test",
+      "role": "tutor",
+      "q": "",
+      "subjectId": "sub_chemistry",
+      "level": "college",
+      "format": "online",
+      "minBudgetCentavos": 30000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "reymart@example.test"
+      ],
+      "note": "College chemistry exam preparation. Reymart is preparing for a chemistry exam."
+    },
+    {
+      "id": "tutor_english_high_school",
+      "viewer": "maria@example.test",
+      "role": "tutor",
+      "q": "",
+      "subjectId": "sub_english",
+      "level": "high_school",
+      "format": "in_person",
+      "minBudgetCentavos": 20000,
+      "maxDistanceMeters": null,
+      "relevant": [
+        "shaira@example.test"
+      ],
+      "note": "In-person high-school English writing. Shaira prefers weekend in-person sessions."
+    }
+  ]
+}

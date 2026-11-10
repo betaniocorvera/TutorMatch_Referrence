@@ -596,31 +596,72 @@
     }
   }
 
-  function sendRequest(result, button) {
-    const person = result.profile || {};
-    auth.saveSentRequest({
-      id: person.userId,
-      name: person.name,
-      role: person.role,
-      subjects: (person.subjects || []).map((subject) => subject.name)
-    });
+  function pickRequestSubject(result) {
+    const subjects = (result.profile && result.profile.subjects) || [];
+    if (!subjects.length) return null;
+    const selected = els.subject ? els.subject.value : '';
+    if (selected) {
+      const match = subjects.find((subject) => String(subject.id) === String(selected));
+      if (match) return match;
+    }
+    return subjects[0];
+  }
+
+  function setRequestButtonState(personId, label, disabled, sourceButton) {
     document.querySelectorAll('[data-action="request"]').forEach((cardButton) => {
-      if (String(cardButton.dataset.id) === String(person.userId)) {
-        cardButton.disabled = true;
-        cardButton.textContent = 'Request sent';
+      if (String(cardButton.dataset.id) === String(personId)) {
+        cardButton.disabled = disabled;
+        cardButton.textContent = label;
       }
     });
-    if (button) {
-      button.disabled = true;
-      button.textContent = 'Request sent';
+    if (sourceButton) {
+      sourceButton.disabled = disabled;
+      sourceButton.textContent = label;
     }
     const panelButton = document.querySelector('[data-panel-action="request"]');
-    if (panelButton) {
-      panelButton.disabled = true;
-      panelButton.textContent = 'Request sent';
+    if (
+      panelButton &&
+      currentPanelResult &&
+      String(currentPanelResult.profile.userId) === String(personId)
+    ) {
+      panelButton.disabled = disabled;
+      panelButton.textContent = label;
     }
-    showToast('Request sent to ' + person.name + '.');
-    global.dispatchEvent(new CustomEvent('tutormatch:request-sent'));
+  }
+
+  async function sendRequest(result, button) {
+    const person = result.profile || {};
+    const subject = pickRequestSubject(result);
+    const match = result.match || {};
+    const slots = Array.isArray(match.availabilityOverlap)
+      ? match.availabilityOverlap.slice(0, 4)
+      : [];
+    const subjectName = subject ? subject.name : 'tutoring';
+
+    setRequestButtonState(person.userId, 'Sending...', true, button);
+    try {
+      const data = await auth.createRequest({
+        toUserId: person.userId,
+        subjectId: subject ? subject.id : null,
+        message: 'Hi! I would like to connect about ' + subjectName + '.',
+        preferredSlots: slots,
+        format: person.format || null
+      });
+      setRequestButtonState(person.userId, 'Request sent', true, button);
+      showToast('Request sent to ' + person.name + '.');
+      global.dispatchEvent(new CustomEvent('tutormatch:request-sent', {
+        detail: { request: data.request }
+      }));
+    } catch (error) {
+      if (error.code === 'CONFLICT') {
+        auth.loadSentRequests().catch(() => {});
+        setRequestButtonState(person.userId, 'Request sent', true, button);
+        showToast('You already have a pending request with ' + person.name + '.');
+        return;
+      }
+      setRequestButtonState(person.userId, 'Send Request', false, button);
+      showToast(error.message || 'Could not send the request.');
+    }
   }
 
   function bindProfilePanel() {

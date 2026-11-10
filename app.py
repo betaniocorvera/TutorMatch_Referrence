@@ -19,7 +19,7 @@ import math
 import os
 import re
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -2039,10 +2039,22 @@ def _parse_search_params(role):
     }, fields
 
 
-def _run_search(viewer, params):
-    """Filter, score, sort, and paginate candidates."""
+def _run_search(viewer, params, soft_subject=False):
+    """Filter, score, sort, and paginate candidates.
+
+    ``soft_subject`` is used only by the offline evaluation script. It keeps
+    the requested subject in the score but does not hard-filter the candidate
+    pool, so rankers can be compared on the same candidates.
+    """
     candidate_role = "tutor" if viewer["role"] == "student" else "student"
     candidates = _load_search_candidates(candidate_role)
+    blocked_ids = _blocked_user_ids(viewer.get("userId"))
+    if blocked_ids:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["user"]["id"] not in blocked_ids
+        ]
     target_slots = params["availability_slots"] or viewer.get("availability") or []
     viewer["_subject_id"] = params["subject_id"]
     viewer["_level"] = params["level"]
@@ -2051,7 +2063,7 @@ def _run_search(viewer, params):
         return _candidate_matches(
             viewer,
             candidate,
-            params["subject_id"],
+            None if soft_subject else params["subject_id"],
             params["format"],
             params["hard_max_rate"],
             params["hard_min_budget"],
@@ -2136,6 +2148,23 @@ def _search_response(expected_role):
         return validation_error(fields)
 
     total, results, relaxed, suggestions = _run_search(viewer, params)
+    _record_analytics(
+        "search_submitted",
+        {
+            "role": user["role"],
+            "subjectId": params["subject_id"],
+            "level": params["level"],
+            "format": params["format"],
+            "filters": {
+                "maxRateCentavos": params["hard_max_rate"],
+                "minBudgetCentavos": params["hard_min_budget"],
+                "availability": params["availability_raw"] or None,
+                "maxDistanceMeters": params["max_distance_meters"],
+            },
+            "resultCount": total,
+        },
+        user_id=user["id"],
+    )
     return jsonify({
         "query": _query_echo(params, user["role"]),
         "total": total,
@@ -3254,6 +3283,10 @@ def public_profile(profile_id):
     )
     if not row:
         return json_error("NOT_FOUND", "Profile not found.", 404)
+    if row["account_id"] != session["user_id"] and _block_exists(
+        session["user_id"], row["account_id"]
+    ):
+        return json_error("NOT_FOUND", "Profile not found.", 404)
 
     subject_rows = db.query_all(
         """
@@ -3304,8 +3337,2025 @@ def public_profile(profile_id):
     }
     _user, viewer = _viewer_profile(session["user_id"])
     distance = _distance_meters(viewer, row)
+    _record_analytics(
+        "profile_viewed",
+        {"role": row["account_role"], "profileId": row["id"]},
+        user_id=session["user_id"],
+    )
     return jsonify({
         "profile": _public_profile(candidate, viewer, distance),
+    })
+
+
+# ============================================================
+# Requests, conversations, and messaging API
+# ============================================================
+REQUEST_STATUSES = ("pending", "accepted", "declined", "cancelled", "expired")
+REQUEST_ACTIONS = ("accept", "decline", "cancel")
+REQUEST_MESSAGE_MAX_LENGTH = 500
+REQUEST_DAILY_LIMIT = 5
+REQUEST_EXPIRY_DAYS = 7
+MESSAGE_MAX_LENGTH = 2000
+MESSAGE_RATE_LIMIT = 30
+MESSAGE_RATE_WINDOW_SECONDS = 60
+
+SESSION_DURATIONS = (30, 60, 90, 120)
+SESSION_STATUSES = (
+    "proposed",
+    "accepted",
+    "declined",
+    "rescheduled",
+    "completed",
+    "cancelled",
+)
+SESSION_ACTIONS = ("accept", "decline", "reschedule", "cancel", "complete")
+SESSION_LOCATION_MAX_LENGTH = 200
+SESSION_NOTE_MAX_LENGTH = 500
+
+REPORT_REASONS = (
+    "harassment",
+    "spam",
+    "impersonation",
+    "inappropriate",
+    "no_show",
+    "other",
+)
+REPORT_DETAILS_MAX_LENGTH = 1000
+
+ANALYTICS_EVENTS = frozenset({
+    "search_submitted",
+    "result_clicked",
+    "profile_viewed",
+    "request_sent",
+    "request_accepted",
+    "request_declined",
+    "request_cancelled",
+    "message_sent",
+    "session_proposed",
+    "session_accepted",
+    "session_declined",
+    "session_rescheduled",
+    "session_completed",
+    "session_cancelled",
+    "report_submitted",
+    "block_created",
+    "block_removed",
+})
+ANALYTICS_FORBIDDEN_KEYS = frozenset({
+    "email",
+    "password",
+    "password_hash",
+    "passwordhash",
+    "birthdate",
+    "body",
+    "message",
+    "token",
+    "address",
+    "exact_location",
+    "exactlocation",
+    "latitude",
+    "longitude",
+    "coarse_geohash",
+    "coarsegeohash",
+    "verification_document",
+    "verificationdocument",
+})
+ANALYTICS_PAYLOAD_MAX_BYTES = 4000
+
+REQUEST_SELECT = """
+    SELECT r.*, s.name AS subject_name,
+           fu.name AS from_name, fu.role AS from_role,
+           fp.photo_url AS from_photo_url,
+           tu.name AS to_name, tu.role AS to_role,
+           tp.photo_url AS to_photo_url,
+           c.id AS conversation_id
+    FROM match_requests r
+    JOIN users fu ON fu.id = r.from_user_id
+    LEFT JOIN profiles fp ON fp.user_id = fu.id
+    JOIN users tu ON tu.id = r.to_user_id
+    LEFT JOIN profiles tp ON tp.user_id = tu.id
+    LEFT JOIN subjects s ON s.id = r.subject_id
+    LEFT JOIN conversations c ON c.request_id = r.id
+"""
+
+
+def _expire_pending_requests():
+    """Mark stale pending requests as expired before reading or acting."""
+    db.execute(
+        """
+        UPDATE match_requests
+        SET status = 'expired', responded_at = UTC_TIMESTAMP(), pending_key = NULL
+        WHERE status = 'pending' AND expires_at < UTC_TIMESTAMP()
+        """
+    )
+
+
+def _json_object(value):
+    """Read a JSON object from MySQL, tolerating NULL and old rows."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _account_summary(user_id):
+    """Small public user card used by requests and conversations."""
+    row = db.query_one(
+        """
+        SELECT u.id, u.role, u.name, p.photo_url, p.verified_at
+        FROM users u
+        LEFT JOIN profiles p ON p.user_id = u.id
+        WHERE u.id = %s AND u.status = 'active'
+        """,
+        (user_id,),
+    )
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "role": row["role"],
+        "name": row["name"],
+        "photoUrl": row["photo_url"],
+        "verified": row["verified_at"] is not None,
+    }
+
+
+def _block_direction(user_id, other_id):
+    """Return (blocked_by_me, blocked_by_other) for one pair."""
+    if not user_id or not other_id or user_id == other_id:
+        return False, False
+    rows = db.query_all(
+        """
+        SELECT blocker_id, blocked_id
+        FROM blocks
+        WHERE (blocker_id = %s AND blocked_id = %s)
+           OR (blocker_id = %s AND blocked_id = %s)
+        """,
+        (user_id, other_id, other_id, user_id),
+    )
+    blocked_by_me = any(row["blocker_id"] == user_id for row in rows)
+    blocked_by_other = any(row["blocker_id"] == other_id for row in rows)
+    return blocked_by_me, blocked_by_other
+
+
+def _block_exists(user_id, other_id):
+    """True when either user has blocked the other one."""
+    blocked_by_me, blocked_by_other = _block_direction(user_id, other_id)
+    return blocked_by_me or blocked_by_other
+
+
+def _blocked_user_ids(user_id):
+    """All user IDs hidden from this viewer in either block direction."""
+    rows = db.query_all(
+        """
+        SELECT blocked_id AS user_id FROM blocks WHERE blocker_id = %s
+        UNION
+        SELECT blocker_id AS user_id FROM blocks WHERE blocked_id = %s
+        """,
+        (user_id, user_id),
+    )
+    return {row["user_id"] for row in rows}
+
+
+def _clean_analytics_payload(value, depth=0):
+    """Drop sensitive keys and cap the size of an analytics payload."""
+    if depth > 3:
+        return None
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in list(value.items())[:30]:
+            key_text = str(key).strip()[:60]
+            if not key_text or key_text.lower() in ANALYTICS_FORBIDDEN_KEYS:
+                continue
+            item = _clean_analytics_payload(item, depth + 1)
+            if item is not None:
+                cleaned[key_text] = item
+        return cleaned
+    if isinstance(value, list):
+        return [
+            item
+            for item in (
+                _clean_analytics_payload(entry, depth + 1)
+                for entry in value[:20]
+            )
+            if item is not None
+        ]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:200]
+    return None
+
+
+def _record_analytics(name, payload=None, user_id=None):
+    """Best-effort analytics insert; never break the user's action."""
+    if name not in ANALYTICS_EVENTS:
+        return
+    cleaned = _clean_analytics_payload(payload or {})
+    try:
+        encoded = json.dumps(cleaned, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return
+    if len(encoded.encode("utf-8")) > ANALYTICS_PAYLOAD_MAX_BYTES:
+        return
+    try:
+        db.execute(
+            """
+            INSERT INTO analytics_events (user_id, name, payload)
+            VALUES (%s, %s, %s)
+            """,
+            (user_id, name, encoded),
+        )
+    except Exception:
+        # Analytics must never block requests, messages, or safety actions.
+        pass
+
+
+def _parse_datetime_value(value):
+    """Parse an ISO datetime and normalize it to naive UTC."""
+    text = str(value or "").strip()
+    if not text:
+        return None, "Choose a date and time."
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None, "Choose a valid date and time."
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed, None
+
+
+def _session_time_text(value):
+    """Short UTC timestamp used inside system messages."""
+    if not isinstance(value, datetime):
+        return ""
+    return value.strftime("%b %d, %Y %I:%M %p UTC")
+
+
+def _insert_system_message(cursor, conversation_id, body, now):
+    """Append a system message and move the conversation preview forward."""
+    cursor.execute(
+        """
+        INSERT INTO messages (conversation_id, sender_id, type, body)
+        VALUES (%s, NULL, 'system', %s)
+        """,
+        (conversation_id, body),
+    )
+    cursor.execute(
+        "UPDATE conversations SET last_message_at = %s WHERE id = %s",
+        (now, conversation_id),
+    )
+
+
+def _notify_user(cursor, user_id, notification_type, payload):
+    """Insert one lightweight notification inside an existing transaction."""
+    cursor.execute(
+        """
+        INSERT INTO notifications (user_id, type, payload)
+        VALUES (%s, %s, %s)
+        """,
+        (user_id, notification_type, json.dumps(payload)),
+    )
+
+
+def _session_row(session_id):
+    return db.query_one(
+        """
+        SELECT sp.*, u.name AS proposed_by_name
+        FROM session_proposals sp
+        JOIN users u ON u.id = sp.proposed_by
+        WHERE sp.id = %s
+        """,
+        (session_id,),
+    )
+
+
+def _session_payload(row):
+    """Serialize a session proposal without exposing private profile data."""
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "conversationId": row.get("conversation_id"),
+        "proposedBy": row.get("proposed_by"),
+        "proposedByName": row.get("proposed_by_name"),
+        "startsAt": _datetime_text(row.get("starts_at")),
+        "durationMins": row.get("duration_mins"),
+        "format": row.get("format"),
+        "location": row.get("location_text"),
+        "note": row.get("note"),
+        "status": row.get("status"),
+        "createdAt": _datetime_text(row.get("created_at")),
+        "respondedAt": _datetime_text(row.get("responded_at")),
+    }
+
+
+def _parse_request_slots(value):
+    """Validate preferredSlots from a request body."""
+    if value is None or value == "":
+        return [], None
+    if not isinstance(value, list):
+        return [], "Choose valid availability."
+    result = []
+    for item in value[:8]:
+        if not isinstance(item, dict):
+            return [], "Choose valid availability."
+        day = str(item.get("day") or "").strip().lower()
+        start = str(item.get("start") or "").strip()
+        end = str(item.get("end") or "").strip()
+        start_minutes = _to_minutes(start)
+        end_minutes = _to_minutes(end)
+        if (
+            day not in DAY_INDEX
+            or start_minutes is None
+            or end_minutes is None
+            or start_minutes >= end_minutes
+        ):
+            return [], "Choose valid availability."
+        result.append({"day": day, "start": start, "end": end})
+    return result, None
+
+
+def _fetch_request_row(request_id):
+    return db.query_one(REQUEST_SELECT + " WHERE r.id = %s", (request_id,))
+
+
+def _request_payload(row, viewer_id):
+    """Serialize a request row with privacy-safe participant cards."""
+    direction = "incoming" if row["to_user_id"] == viewer_id else "outgoing"
+    subject = None
+    if row.get("subject_id"):
+        subject = {
+            "id": row["subject_id"],
+            "name": row.get("subject_name") or row["subject_id"],
+        }
+    return {
+        "id": row["id"],
+        "direction": direction,
+        "from": {
+            "id": row["from_user_id"],
+            "name": row["from_name"],
+            "photoUrl": row.get("from_photo_url"),
+            "role": row["from_role"],
+        },
+        "to": {
+            "id": row["to_user_id"],
+            "name": row["to_name"],
+            "photoUrl": row.get("to_photo_url"),
+            "role": row["to_role"],
+        },
+        "subject": subject,
+        "message": row.get("message"),
+        "preferredSlots": _json_list(row.get("preferred_slots")),
+        "format": row.get("format"),
+        "status": row["status"],
+        "createdAt": _datetime_text(row.get("created_at")),
+        "respondedAt": _datetime_text(row.get("responded_at")),
+        "expiresAt": _datetime_text(row.get("expires_at")),
+        "conversationId": row.get("conversation_id"),
+    }
+
+
+def _conversation_row(conversation_id):
+    return db.query_one(
+        """
+        SELECT c.*, r.status AS request_status, r.subject_id,
+               s.name AS subject_name
+        FROM conversations c
+        JOIN match_requests r ON r.id = c.request_id
+        LEFT JOIN subjects s ON s.id = r.subject_id
+        WHERE c.id = %s
+        """,
+        (conversation_id,),
+    )
+
+
+def _conversation_for_user(conversation_id, user_id):
+    row = _conversation_row(conversation_id)
+    if not row:
+        return None
+    if row["user_a_id"] != user_id and row["user_b_id"] != user_id:
+        return None
+    return row
+
+
+def _other_user_id(conversation, user_id):
+    if conversation["user_a_id"] == user_id:
+        return conversation["user_b_id"]
+    return conversation["user_a_id"]
+
+
+def _message_payload(row):
+    return {
+        "id": row["id"],
+        "conversationId": row["conversation_id"],
+        "senderId": row.get("sender_id"),
+        "type": row["type"],
+        "body": row.get("body"),
+        "createdAt": _datetime_text(row.get("created_at")),
+        "readAt": _datetime_text(row.get("read_at")),
+    }
+
+
+def _notification_payload(row):
+    return {
+        "id": row["id"],
+        "type": row["type"],
+        "payload": _json_object(row.get("payload")),
+        "readAt": _datetime_text(row.get("read_at")),
+        "createdAt": _datetime_text(row.get("created_at")),
+    }
+
+
+def _latest_session_payload(conversation_id):
+    row = db.query_one(
+        """
+        SELECT sp.*, u.name AS proposed_by_name
+        FROM session_proposals sp
+        JOIN users u ON u.id = sp.proposed_by
+        WHERE sp.conversation_id = %s
+        ORDER BY sp.created_at DESC, sp.id DESC
+        LIMIT 1
+        """,
+        (conversation_id,),
+    )
+    return _session_payload(row)
+
+
+def _conversation_payload(row, viewer_id):
+    other_id = _other_user_id(row, viewer_id)
+    blocked_by_me, blocked_by_other = _block_direction(viewer_id, other_id)
+    other = _account_summary(other_id)
+    last_message = db.query_one(
+        """
+        SELECT id, type, body, sender_id, created_at
+        FROM messages
+        WHERE conversation_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (row["id"],),
+    )
+    unread = db.query_one(
+        """
+        SELECT COUNT(*) AS total
+        FROM messages
+        WHERE conversation_id = %s
+          AND sender_id IS NOT NULL
+          AND sender_id <> %s
+          AND read_at IS NULL
+        """,
+        (row["id"], viewer_id),
+    )
+    preview = None
+    if last_message:
+        preview = (last_message.get("body") or "").strip()
+        if len(preview) > 90:
+            preview = preview[:87] + "..."
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "otherUser": other,
+        "subject": (
+            {"id": row["subject_id"], "name": row.get("subject_name") or row["subject_id"]}
+            if row.get("subject_id")
+            else None
+        ),
+        "lastMessage": (
+            {
+                "id": last_message["id"],
+                "type": last_message["type"],
+                "preview": preview,
+                "senderId": last_message.get("sender_id"),
+                "createdAt": _datetime_text(last_message.get("created_at")),
+            }
+            if last_message
+            else None
+        ),
+        "unreadCount": unread["total"] if unread else 0,
+        "blockedByMe": blocked_by_me,
+        "blockedByOther": blocked_by_other,
+        "readOnly": row["status"] != "active" or blocked_by_me or blocked_by_other,
+        "lastMessageAt": _datetime_text(
+            row.get("last_message_at")
+            or (last_message and last_message.get("created_at"))
+            or row.get("created_at")
+        ),
+    }
+
+
+def _pagination(default_limit, max_limit):
+    page, page_error = _parse_int_arg("page", 1, 1)
+    if page_error:
+        return None, None, validation_error({"page": page_error})
+    limit, limit_error = _parse_int_arg("limit", default_limit, 1, max_limit)
+    if limit_error:
+        return None, None, validation_error({"limit": limit_error})
+    return page, limit, None
+
+
+@app.post("/api/requests")
+@login_required
+def create_request():
+    """Create one pending introduction request."""
+    _expire_pending_requests()
+    user_id = session["user_id"]
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+
+    data = json_body()
+    fields = {}
+    raw_to = data.get("toUserId", data.get("to_user_id"))
+    try:
+        to_user_id = int(raw_to)
+    except (TypeError, ValueError):
+        fields["toUserId"] = "Choose a valid person."
+        return validation_error(fields)
+
+    if to_user_id == user_id:
+        return validation_error({"toUserId": "You cannot request yourself."})
+
+    to_user = fetch_user_by_id(to_user_id)
+    if not to_user or to_user["status"] != "active":
+        return json_error("NOT_FOUND", "That account was not found.", 404)
+    if to_user["role"] == user["role"]:
+        return validation_error(
+            {"toUserId": "Students request tutors, and tutors request students."}
+        )
+    if _block_exists(user_id, to_user_id):
+        return json_error(
+            "BLOCKED",
+            "You cannot send a request while a block is active.",
+            403,
+        )
+
+    my_profile = get_profile_payload(user_id)
+    to_profile = get_profile_payload(to_user_id)
+    if not my_profile or not my_profile["requiredComplete"]:
+        return json_error(
+            "PROFILE_INCOMPLETE",
+            "Complete your profile before sending requests.",
+            400,
+        )
+    if not to_profile or not to_profile["requiredComplete"]:
+        return json_error(
+            "PROFILE_INCOMPLETE",
+            "This profile is not ready for requests yet.",
+            400,
+        )
+
+    subject_id = str(data.get("subjectId") or "").strip() or None
+    subject = None
+    if subject_id:
+        subject = db.query_one(
+            "SELECT id, name FROM subjects WHERE id = %s",
+            (subject_id,),
+        )
+        if not subject:
+            fields["subjectId"] = "Choose a valid subject."
+    elif to_profile.get("subjects"):
+        subject = to_profile["subjects"][0]
+        subject_id = subject["id"]
+    if fields:
+        return validation_error(fields)
+
+    message = str(data.get("message") or "").strip()
+    if len(message) > REQUEST_MESSAGE_MAX_LENGTH:
+        fields["message"] = (
+            f"Keep the introduction under {REQUEST_MESSAGE_MAX_LENGTH} characters."
+        )
+
+    requested_format = str(data.get("format") or "").strip() or None
+    if requested_format and requested_format not in PROFILE_FORMATS:
+        fields["format"] = "Choose a valid format."
+    if not requested_format:
+        requested_format = to_profile.get("format")
+
+    preferred_slots, slot_error = _parse_request_slots(
+        data.get("preferredSlots", data.get("preferred_slots"))
+    )
+    if slot_error:
+        fields["preferredSlots"] = slot_error
+    if fields:
+        return validation_error(fields)
+
+    pending = db.query_one(
+        """
+        SELECT id
+        FROM match_requests
+        WHERE status = 'pending'
+          AND (
+            (from_user_id = %s AND to_user_id = %s)
+            OR (from_user_id = %s AND to_user_id = %s)
+          )
+        LIMIT 1
+        """,
+        (user_id, to_user_id, to_user_id, user_id),
+    )
+    if pending:
+        return json_error(
+            "CONFLICT",
+            "You already have a pending request with this person.",
+            409,
+        )
+
+    if is_rate_limited(
+        "request_sent",
+        REQUEST_DAILY_LIMIT,
+        24 * 60 * 60,
+        user_id=user_id,
+    ):
+        return json_error(
+            "RATE_LIMITED",
+            "You have sent too many requests today. Try again tomorrow.",
+            429,
+        )
+
+    now = now_utc()
+    expires_at = now + timedelta(days=REQUEST_EXPIRY_DAYS)
+    request_id = None
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO match_requests
+                    (from_user_id, to_user_id, subject_id, message,
+                     preferred_slots, format, status, pending_key, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s)
+                """,
+                (
+                    user_id,
+                    to_user_id,
+                    subject_id,
+                    message or None,
+                    json.dumps(preferred_slots) if preferred_slots else None,
+                    requested_format,
+                    f"{user_id}-{to_user_id}",
+                    expires_at,
+                ),
+            )
+            request_id = cursor.lastrowid
+            cursor.execute(
+                """
+                INSERT INTO notifications (user_id, type, payload)
+                VALUES (%s, 'request_received', %s)
+                """,
+                (
+                    to_user_id,
+                    json.dumps({
+                        "requestId": request_id,
+                        "fromUserId": user_id,
+                        "fromName": user["name"],
+                        "subjectId": subject_id,
+                        "subjectName": subject["name"] if subject else None,
+                    }),
+                ),
+            )
+
+    log_event("request_sent", user_id=user_id, details=f"request {request_id}")
+    _record_analytics(
+        "request_sent",
+        {
+            "requestId": request_id,
+            "toUserId": to_user_id,
+            "subjectId": subject_id,
+            "format": requested_format,
+        },
+        user_id=user_id,
+    )
+    return jsonify({"request": _request_payload(_fetch_request_row(request_id), user_id)}), 201
+
+
+@app.get("/api/requests")
+@login_required
+def list_requests():
+    """List incoming or outgoing requests with pagination."""
+    _expire_pending_requests()
+    user_id = session["user_id"]
+    box = str(request.args.get("box") or "incoming").strip().lower()
+    if box not in ("incoming", "outgoing"):
+        return validation_error({"box": "Choose incoming or outgoing."})
+
+    status = str(request.args.get("status") or "").strip().lower() or None
+    if status and status not in REQUEST_STATUSES:
+        return validation_error({"status": "Choose a valid request status."})
+
+    page, limit, error = _pagination(10, 50)
+    if error:
+        return error
+
+    where = ["r.to_user_id = %s" if box == "incoming" else "r.from_user_id = %s"]
+    params = [user_id]
+    if status:
+        where.append("r.status = %s")
+        params.append(status)
+    where_sql = " AND ".join(where)
+
+    total_row = db.query_one(
+        f"SELECT COUNT(*) AS total FROM match_requests r WHERE {where_sql}",
+        tuple(params),
+    )
+    rows = db.query_all(
+        REQUEST_SELECT + f" WHERE {where_sql} ORDER BY r.created_at DESC, r.id DESC LIMIT %s OFFSET %s",
+        tuple(params + [limit, (page - 1) * limit]),
+    )
+    return jsonify({
+        "total": total_row["total"] if total_row else 0,
+        "page": page,
+        "limit": limit,
+        "requests": [_request_payload(row, user_id) for row in rows],
+    })
+
+
+@app.patch("/api/requests/<int:request_id>")
+@login_required
+def update_request(request_id):
+    """Accept, decline, or cancel a pending request."""
+    _expire_pending_requests()
+    user_id = session["user_id"]
+    row = _fetch_request_row(request_id)
+    if not row:
+        return json_error("NOT_FOUND", "Request not found.", 404)
+
+    is_from = row["from_user_id"] == user_id
+    is_to = row["to_user_id"] == user_id
+    if not is_from and not is_to:
+        return json_error("FORBIDDEN", "You cannot change this request.", 403)
+
+    data = json_body()
+    action = str(data.get("action") or "").strip().lower()
+    if action not in REQUEST_ACTIONS:
+        return validation_error({"action": "Choose accept, decline, or cancel."})
+    if action in ("accept", "decline") and not is_to:
+        return json_error("FORBIDDEN", "Only the recipient can respond.", 403)
+    if action == "cancel" and not is_from:
+        return json_error("FORBIDDEN", "Only the sender can cancel.", 403)
+    if action == "accept" and _block_exists(row["from_user_id"], row["to_user_id"]):
+        return json_error(
+            "BLOCKED",
+            "This request cannot be accepted while a block is active.",
+            403,
+        )
+    if row["status"] != "pending":
+        return json_error("CONFLICT", "This request is no longer pending.", 409)
+
+    now = now_utc()
+    conversation_id = None
+    conflict = False
+
+    if action == "accept":
+        with db.transaction() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE match_requests
+                    SET status = 'accepted', responded_at = %s, pending_key = NULL
+                    WHERE id = %s AND status = 'pending'
+                    """,
+                    (now, request_id),
+                )
+                if cursor.rowcount != 1:
+                    conflict = True
+                else:
+                    cursor.execute(
+                        "SELECT id FROM conversations WHERE request_id = %s",
+                        (request_id,),
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        conversation_id = existing["id"]
+                    else:
+                        cursor.execute(
+                            """
+                            INSERT INTO conversations
+                                (request_id, user_a_id, user_b_id, status, last_message_at)
+                            VALUES (%s, %s, %s, 'active', %s)
+                            """,
+                            (request_id, row["from_user_id"], row["to_user_id"], now),
+                        )
+                        conversation_id = cursor.lastrowid
+                        cursor.execute(
+                            """
+                            INSERT INTO messages
+                                (conversation_id, sender_id, type, body)
+                            VALUES (%s, NULL, 'system', %s)
+                            """,
+                            (
+                                conversation_id,
+                                "Request accepted. You can now chat.",
+                            ),
+                        )
+                    cursor.execute(
+                        """
+                        INSERT INTO notifications (user_id, type, payload)
+                        VALUES (%s, 'request_accepted', %s)
+                        """,
+                        (
+                            row["from_user_id"],
+                            json.dumps({
+                                "requestId": request_id,
+                                "conversationId": conversation_id,
+                                "acceptedBy": row["to_name"],
+                                "actorName": row["to_name"],
+                            }),
+                        ),
+                    )
+        if conflict:
+            return json_error("CONFLICT", "This request is no longer pending.", 409)
+        log_event("request_accepted", user_id=user_id, details=f"request {request_id}")
+        _record_analytics(
+            "request_accepted",
+            {
+                "requestId": request_id,
+                "conversationId": conversation_id,
+                "subjectId": row.get("subject_id"),
+            },
+            user_id=user_id,
+        )
+    else:
+        new_status = "declined" if action == "decline" else "cancelled"
+        notify_user_id = (
+            row["from_user_id"] if action == "decline" else row["to_user_id"]
+        )
+        notification_type = (
+            "request_declined" if action == "decline" else "request_cancelled"
+        )
+        with db.transaction() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE match_requests
+                    SET status = %s, responded_at = %s, pending_key = NULL
+                    WHERE id = %s AND status = 'pending'
+                    """,
+                    (new_status, now, request_id),
+                )
+                if cursor.rowcount != 1:
+                    conflict = True
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO notifications (user_id, type, payload)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (
+                            notify_user_id,
+                            notification_type,
+                            json.dumps({
+                                "requestId": request_id,
+                                "status": new_status,
+                                "actorName": (
+                                    row["to_name"]
+                                    if action == "decline"
+                                    else row["from_name"]
+                                ),
+                            }),
+                        ),
+                    )
+        if conflict:
+            return json_error("CONFLICT", "This request is no longer pending.", 409)
+        log_event(
+            f"request_{new_status}",
+            user_id=user_id,
+            details=f"request {request_id}",
+        )
+        _record_analytics(
+            f"request_{new_status}",
+            {"requestId": request_id, "subjectId": row.get("subject_id")},
+            user_id=user_id,
+        )
+
+    # Opening/responding to a request clears its request notification.
+    db.execute(
+        """
+        UPDATE notifications
+        SET read_at = UTC_TIMESTAMP()
+        WHERE user_id = %s
+          AND read_at IS NULL
+          AND type = 'request_received'
+          AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.requestId')) = %s
+        """,
+        (user_id, str(request_id)),
+    )
+
+    fresh = _fetch_request_row(request_id)
+    return jsonify({
+        "request": _request_payload(fresh, user_id),
+        "conversationId": conversation_id or fresh.get("conversation_id"),
+    })
+
+
+@app.get("/api/conversations")
+@login_required
+def list_conversations():
+    """List conversations for the current participant."""
+    user_id = session["user_id"]
+    page, limit, error = _pagination(20, 50)
+    if error:
+        return error
+
+    total_row = db.query_one(
+        """
+        SELECT COUNT(*) AS total
+        FROM conversations
+        WHERE user_a_id = %s OR user_b_id = %s
+        """,
+        (user_id, user_id),
+    )
+    rows = db.query_all(
+        """
+        SELECT c.*, r.status AS request_status, r.subject_id,
+               s.name AS subject_name
+        FROM conversations c
+        JOIN match_requests r ON r.id = c.request_id
+        LEFT JOIN subjects s ON s.id = r.subject_id
+        WHERE c.user_a_id = %s OR c.user_b_id = %s
+        ORDER BY COALESCE(c.last_message_at, c.created_at) DESC, c.id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (user_id, user_id, limit, (page - 1) * limit),
+    )
+    return jsonify({
+        "total": total_row["total"] if total_row else 0,
+        "page": page,
+        "limit": limit,
+        "conversations": [
+            _conversation_payload(row, user_id)
+            for row in rows
+        ],
+    })
+
+
+@app.get("/api/conversations/<int:conversation_id>")
+@login_required
+def get_conversation(conversation_id):
+    """Return one conversation with participants and latest session."""
+    user_id = session["user_id"]
+    row = _conversation_for_user(conversation_id, user_id)
+    if not row:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+
+    participant_ids = [row["user_a_id"], row["user_b_id"]]
+    participants = [
+        account
+        for account in (_account_summary(pid) for pid in participant_ids)
+        if account
+    ]
+    other_id = _other_user_id(row, user_id)
+    blocked_by_me, blocked_by_other = _block_direction(user_id, other_id)
+    return jsonify({
+        "conversation": {
+            "id": row["id"],
+            "status": row["status"],
+            "blockedByMe": blocked_by_me,
+            "blockedByOther": blocked_by_other,
+            "readOnly": (
+                row["status"] != "active" or blocked_by_me or blocked_by_other
+            ),
+            "request": {
+                "id": row["request_id"],
+                "status": row["request_status"],
+                "subject": (
+                    {
+                        "id": row["subject_id"],
+                        "name": row.get("subject_name") or row["subject_id"],
+                    }
+                    if row.get("subject_id")
+                    else None
+                ),
+            },
+            "participants": participants,
+            "latestSession": _latest_session_payload(row["id"]),
+            "lastMessageAt": _datetime_text(row.get("last_message_at")),
+            "createdAt": _datetime_text(row.get("created_at")),
+        }
+    })
+
+
+@app.get("/api/conversations/<int:conversation_id>/messages")
+@login_required
+def list_messages(conversation_id):
+    """Return a page of messages, newest page first internally."""
+    user_id = session["user_id"]
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+
+    before = request.args.get("before")
+    before_id = None
+    if before not in (None, ""):
+        try:
+            before_id = int(str(before).strip())
+        except (TypeError, ValueError):
+            return validation_error({"before": "Choose a valid message."})
+
+    limit, limit_error = _parse_int_arg("limit", 30, 1, 100)
+    if limit_error:
+        return validation_error({"limit": limit_error})
+
+    params = [conversation_id]
+    before_sql = ""
+    if before_id is not None:
+        before_sql = " AND id < %s"
+        params.append(before_id)
+    rows = db.query_all(
+        f"""
+        SELECT id, conversation_id, sender_id, type, body, created_at, read_at
+        FROM messages
+        WHERE conversation_id = %s{before_sql}
+        ORDER BY id DESC
+        LIMIT %s
+        """,
+        tuple(params + [limit + 1]),
+    )
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    rows.reverse()
+    return jsonify({
+        "messages": [_message_payload(row) for row in rows],
+        "hasMore": has_more,
+    })
+
+
+@app.post("/api/conversations/<int:conversation_id>/messages")
+@login_required
+def send_message(conversation_id):
+    """Send a text message. Chat must be active."""
+    user_id = session["user_id"]
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+    if conversation["status"] != "active":
+        return json_error("CHAT_LOCKED", "This conversation is not open.", 403)
+    other_id = _other_user_id(conversation, user_id)
+    if _block_exists(user_id, other_id):
+        return json_error(
+            "BLOCKED",
+            "This conversation is read-only while a block is active.",
+            403,
+        )
+
+    data = json_body()
+    message_type = str(data.get("type") or "text").strip().lower()
+    if message_type != "text":
+        return validation_error(
+            {"type": "Only text messages are supported in V1."}
+        )
+    body = str(data.get("body") or "").strip()
+    if not body:
+        return validation_error({"body": "Write a message first."})
+    if len(body) > MESSAGE_MAX_LENGTH:
+        return validation_error(
+            {"body": f"Keep messages under {MESSAGE_MAX_LENGTH} characters."}
+        )
+
+    if is_rate_limited(
+        "message_sent",
+        MESSAGE_RATE_LIMIT,
+        MESSAGE_RATE_WINDOW_SECONDS,
+        user_id=user_id,
+    ):
+        return json_error(
+            "RATE_LIMITED",
+            "You are sending messages too quickly. Try again shortly.",
+            429,
+        )
+
+    sender = fetch_user_by_id(user_id)
+    now = now_utc()
+    message_id = None
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO messages (conversation_id, sender_id, type, body)
+                VALUES (%s, %s, 'text', %s)
+                """,
+                (conversation_id, user_id, body),
+            )
+            message_id = cursor.lastrowid
+            cursor.execute(
+                "UPDATE conversations SET last_message_at = %s WHERE id = %s",
+                (now, conversation_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO notifications (user_id, type, payload)
+                VALUES (%s, 'message_received', %s)
+                """,
+                (
+                    other_id,
+                    json.dumps({
+                        "conversationId": conversation_id,
+                        "messageId": message_id,
+                        "senderId": user_id,
+                        "senderName": sender["name"] if sender else None,
+                        "actorName": sender["name"] if sender else None,
+                        "preview": body[:120],
+                    }),
+                ),
+            )
+
+    log_event("message_sent", user_id=user_id, details=f"conversation {conversation_id}")
+    _record_analytics(
+        "message_sent",
+        {"conversationId": conversation_id, "length": len(body)},
+        user_id=user_id,
+    )
+    message = db.query_one(
+        """
+        SELECT id, conversation_id, sender_id, type, body, created_at, read_at
+        FROM messages
+        WHERE id = %s
+        """,
+        (message_id,),
+    )
+    return jsonify({"message": _message_payload(message)}), 201
+
+
+@app.patch("/api/conversations/<int:conversation_id>/read")
+@login_required
+def mark_conversation_read(conversation_id):
+    """Mark messages from the other participant as read."""
+    user_id = session["user_id"]
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+
+    data = json_body()
+    last_message_id = data.get("lastMessageId")
+    now = now_utc()
+    params = [now, conversation_id, user_id]
+    last_sql = ""
+    if last_message_id not in (None, ""):
+        try:
+            last_id = int(last_message_id)
+        except (TypeError, ValueError):
+            return validation_error({"lastMessageId": "Choose a valid message."})
+        last_sql = " AND id <= %s"
+        params.append(last_id)
+    db.execute(
+        f"""
+        UPDATE messages
+        SET read_at = %s
+        WHERE conversation_id = %s
+          AND sender_id IS NOT NULL
+          AND sender_id <> %s
+          AND read_at IS NULL{last_sql}
+        """,
+        tuple(params),
+    )
+    db.execute(
+        """
+        UPDATE notifications
+        SET read_at = %s
+        WHERE user_id = %s
+          AND read_at IS NULL
+          AND type IN ('message_received', 'request_accepted')
+          AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.conversationId')) = %s
+        """,
+        (now, user_id, str(conversation_id)),
+    )
+    return "", 204
+
+
+@app.get("/api/notifications")
+@login_required
+def list_notifications():
+    """Return in-app notifications and the unread count."""
+    user_id = session["user_id"]
+    unread_only = str(request.args.get("unread") or "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    page, limit, error = _pagination(20, 50)
+    if error:
+        return error
+
+    where = ["user_id = %s"]
+    params = [user_id]
+    if unread_only:
+        where.append("read_at IS NULL")
+    where_sql = " AND ".join(where)
+
+    total_row = db.query_one(
+        f"SELECT COUNT(*) AS total FROM notifications WHERE {where_sql}",
+        tuple(params),
+    )
+    unread_row = db.query_one(
+        """
+        SELECT COUNT(*) AS total
+        FROM notifications
+        WHERE user_id = %s AND read_at IS NULL
+        """,
+        (user_id,),
+    )
+    rows = db.query_all(
+        f"""
+        SELECT id, type, payload, read_at, created_at
+        FROM notifications
+        WHERE {where_sql}
+        ORDER BY created_at DESC, id DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(params + [limit, (page - 1) * limit]),
+    )
+    unread_count = unread_row["total"] if unread_row else 0
+    return jsonify({
+        "total": total_row["total"] if total_row else 0,
+        "unread": unread_count,
+        "unreadCount": unread_count,
+        "page": page,
+        "limit": limit,
+        "notifications": [_notification_payload(row) for row in rows],
+    })
+
+
+@app.patch("/api/notifications/<int:notification_id>/read")
+@login_required
+def mark_notification_read(notification_id):
+    """Mark one notification as read."""
+    db.execute(
+        """
+        UPDATE notifications
+        SET read_at = UTC_TIMESTAMP()
+        WHERE id = %s AND user_id = %s AND read_at IS NULL
+        """,
+        (notification_id, session["user_id"]),
+    )
+    return "", 204
+
+
+@app.patch("/api/notifications/read-all")
+@login_required
+def mark_all_notifications_read():
+    """Mark every notification for the current user as read."""
+    db.execute(
+        """
+        UPDATE notifications
+        SET read_at = UTC_TIMESTAMP()
+        WHERE user_id = %s AND read_at IS NULL
+        """,
+        (session["user_id"],),
+    )
+    return "", 204
+
+
+# ============================================================
+# Session proposals
+# ============================================================
+@app.post("/api/sessions")
+@login_required
+def create_session():
+    """Propose a tutoring session inside an open conversation."""
+    user_id = session["user_id"]
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+
+    data = json_body()
+    fields = {}
+    raw_conversation = data.get("conversationId", data.get("conversation_id"))
+    try:
+        conversation_id = int(raw_conversation)
+    except (TypeError, ValueError):
+        return validation_error({"conversationId": "Choose a valid conversation."})
+
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+    if conversation["status"] != "active":
+        return json_error(
+            "CHAT_LOCKED",
+            "Session proposals require an open conversation.",
+            403,
+        )
+    other_id = _other_user_id(conversation, user_id)
+    if _block_exists(user_id, other_id):
+        return json_error(
+            "BLOCKED",
+            "This conversation is read-only while a block is active.",
+            403,
+        )
+
+    starts_at, start_error = _parse_datetime_value(
+        data.get("startsAt", data.get("starts_at"))
+    )
+    now = now_utc()
+    if start_error:
+        fields["startsAt"] = start_error
+    elif starts_at <= now:
+        fields["startsAt"] = "Choose a future date and time."
+
+    try:
+        duration_mins = int(data.get("durationMins", data.get("duration_mins")))
+    except (TypeError, ValueError):
+        duration_mins = None
+    if duration_mins not in SESSION_DURATIONS:
+        fields["durationMins"] = "Choose 30, 60, 90, or 120 minutes."
+
+    session_format = str(data.get("format") or "").strip().lower()
+    if session_format not in PROFILE_FORMATS:
+        fields["format"] = "Choose a valid session format."
+
+    location = str(data.get("location") or "").strip()
+    if len(location) > SESSION_LOCATION_MAX_LENGTH:
+        fields["location"] = (
+            f"Keep the location under {SESSION_LOCATION_MAX_LENGTH} characters."
+        )
+    note = str(data.get("note") or "").strip()
+    if len(note) > SESSION_NOTE_MAX_LENGTH:
+        fields["note"] = f"Keep the note under {SESSION_NOTE_MAX_LENGTH} characters."
+    if fields:
+        return validation_error(fields)
+
+    pending = db.query_one(
+        """
+        SELECT id
+        FROM session_proposals
+        WHERE conversation_id = %s
+          AND status IN ('proposed', 'rescheduled')
+        LIMIT 1
+        """,
+        (conversation_id,),
+    )
+    if pending:
+        return json_error(
+            "CONFLICT",
+            "There is already a session waiting for a response.",
+            409,
+        )
+
+    session_id = None
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO session_proposals
+                    (conversation_id, proposed_by, starts_at, duration_mins,
+                     format, location_text, note, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'proposed')
+                """,
+                (
+                    conversation_id,
+                    user_id,
+                    starts_at,
+                    duration_mins,
+                    session_format,
+                    location or None,
+                    note or None,
+                ),
+            )
+            session_id = cursor.lastrowid
+            _notify_user(
+                cursor,
+                other_id,
+                "session_proposed",
+                {
+                    "sessionId": session_id,
+                    "conversationId": conversation_id,
+                    "startsAt": _datetime_text(starts_at),
+                    "actorName": user["name"],
+                    "subjectName": conversation.get("subject_name"),
+                },
+            )
+            _insert_system_message(
+                cursor,
+                conversation_id,
+                f"{user['name']} proposed a session for "
+                f"{_session_time_text(starts_at)}.",
+                now,
+            )
+
+    _record_analytics(
+        "session_proposed",
+        {
+            "sessionId": session_id,
+            "conversationId": conversation_id,
+            "durationMins": duration_mins,
+            "format": session_format,
+        },
+        user_id=user_id,
+    )
+    return jsonify({"session": _session_payload(_session_row(session_id))}), 201
+
+
+@app.get("/api/sessions")
+@login_required
+def list_sessions():
+    """List sessions for the current user, optionally filtered by date."""
+    user_id = session["user_id"]
+    from_text = (request.args.get("from") or "").strip()
+    to_text = (request.args.get("to") or "").strip()
+    from_date = None
+    to_date = None
+    fields = {}
+    if from_text:
+        try:
+            from_date = datetime.strptime(from_text, "%Y-%m-%d").date()
+        except ValueError:
+            fields["from"] = "Use YYYY-MM-DD."
+    if to_text:
+        try:
+            to_date = datetime.strptime(to_text, "%Y-%m-%d").date()
+        except ValueError:
+            fields["to"] = "Use YYYY-MM-DD."
+    if from_date and to_date and from_date > to_date:
+        fields["to"] = "The end date must be after the start date."
+    if fields:
+        return validation_error(fields)
+
+    where = ["(c.user_a_id = %s OR c.user_b_id = %s)"]
+    params = [user_id, user_id]
+    if from_date:
+        where.append("sp.starts_at >= %s")
+        params.append(datetime.combine(from_date, datetime.min.time()))
+    if to_date:
+        where.append("sp.starts_at <= %s")
+        params.append(datetime.combine(to_date, datetime.max.time()))
+
+    rows = db.query_all(
+        f"""
+        SELECT sp.*, u.name AS proposed_by_name,
+               c.user_a_id, c.user_b_id
+        FROM session_proposals sp
+        JOIN conversations c ON c.id = sp.conversation_id
+        JOIN users u ON u.id = sp.proposed_by
+        WHERE {' AND '.join(where)}
+        ORDER BY sp.starts_at ASC, sp.id DESC
+        LIMIT 100
+        """,
+        tuple(params),
+    )
+    sessions = []
+    for row in rows:
+        payload = _session_payload(row)
+        other_id = (
+            row["user_b_id"] if row["user_a_id"] == user_id else row["user_a_id"]
+        )
+        payload["otherUser"] = _account_summary(other_id)
+        sessions.append(payload)
+    return jsonify({"sessions": sessions})
+
+
+@app.patch("/api/sessions/<int:session_id>")
+@login_required
+def update_session(session_id):
+    """Accept, decline, reschedule, cancel, or complete a session."""
+    user_id = session["user_id"]
+    user = fetch_user_by_id(user_id)
+    if not user:
+        return json_error("UNAUTHORIZED", "Please log in again.", 401)
+
+    row = db.query_one(
+        """
+        SELECT sp.*, u.name AS proposed_by_name,
+               c.user_a_id, c.user_b_id
+        FROM session_proposals sp
+        JOIN conversations c ON c.id = sp.conversation_id
+        JOIN users u ON u.id = sp.proposed_by
+        WHERE sp.id = %s
+        """,
+        (session_id,),
+    )
+    if not row:
+        return json_error("NOT_FOUND", "Session not found.", 404)
+    if user_id not in (row["user_a_id"], row["user_b_id"]):
+        return json_error("NOT_FOUND", "Session not found.", 404)
+
+    data = json_body()
+    action = str(data.get("action") or "").strip().lower()
+    if action not in SESSION_ACTIONS:
+        return validation_error({"action": "Choose a valid session action."})
+
+    other_id = row["user_b_id"] if row["user_a_id"] == user_id else row["user_a_id"]
+    if _block_exists(user_id, other_id) and action not in ("decline", "cancel"):
+        return json_error(
+            "BLOCKED",
+            "This conversation is read-only while a block is active.",
+            403,
+        )
+
+    status = row["status"]
+    if action in ("accept", "decline"):
+        if row["proposed_by"] == user_id:
+            return json_error(
+                "FORBIDDEN",
+                "Only the other participant can accept or decline.",
+                403,
+            )
+        if status not in ("proposed", "rescheduled"):
+            return json_error(
+                "CONFLICT",
+                "This session is no longer waiting for a response.",
+                409,
+            )
+    elif action == "reschedule":
+        if status not in ("proposed", "rescheduled", "accepted"):
+            return json_error("CONFLICT", "This session cannot be rescheduled.", 409)
+    elif action == "cancel":
+        if status in ("cancelled", "completed", "declined"):
+            return json_error("CONFLICT", "This session cannot be cancelled.", 409)
+    elif action == "complete":
+        if status != "accepted":
+            return json_error(
+                "CONFLICT",
+                "Only an accepted session can be completed.",
+                409,
+            )
+
+    now = now_utc()
+    fields = {}
+    new_starts_at = row["starts_at"]
+    new_duration = row["duration_mins"]
+    if action == "reschedule":
+        new_starts_at, start_error = _parse_datetime_value(
+            data.get("startsAt", data.get("starts_at"))
+        )
+        if start_error:
+            fields["startsAt"] = start_error
+        elif new_starts_at <= now:
+            fields["startsAt"] = "Choose a future date and time."
+        raw_duration = data.get("durationMins", data.get("duration_mins"))
+        if raw_duration not in (None, ""):
+            try:
+                new_duration = int(raw_duration)
+            except (TypeError, ValueError):
+                new_duration = None
+        if new_duration not in SESSION_DURATIONS:
+            fields["durationMins"] = "Choose 30, 60, 90, or 120 minutes."
+        if fields:
+            return validation_error(fields)
+
+    status_map = {
+        "accept": "accepted",
+        "decline": "declined",
+        "reschedule": "rescheduled",
+        "cancel": "cancelled",
+        "complete": "completed",
+    }
+    notification_map = {
+        "accept": "session_accepted",
+        "decline": "session_declined",
+        "reschedule": "session_rescheduled",
+        "cancel": "session_cancelled",
+        "complete": "session_completed",
+    }
+    new_status = status_map[action]
+    message_text = {
+        "accept": f"{user['name']} accepted the session.",
+        "decline": f"{user['name']} declined the session.",
+        "reschedule": (
+            f"{user['name']} rescheduled the session to "
+            f"{_session_time_text(new_starts_at)}."
+        ),
+        "cancel": f"{user['name']} cancelled the session.",
+        "complete": f"{user['name']} marked the session complete.",
+    }[action]
+
+    conflict = False
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            if action == "reschedule":
+                cursor.execute(
+                    """
+                    UPDATE session_proposals
+                    SET starts_at = %s, duration_mins = %s,
+                        status = %s, responded_at = %s
+                    WHERE id = %s AND status = %s
+                    """,
+                    (
+                        new_starts_at,
+                        new_duration,
+                        new_status,
+                        now,
+                        session_id,
+                        status,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE session_proposals
+                    SET status = %s, responded_at = %s
+                    WHERE id = %s AND status = %s
+                    """,
+                    (new_status, now, session_id, status),
+                )
+            if cursor.rowcount != 1:
+                conflict = True
+            else:
+                _notify_user(
+                    cursor,
+                    other_id,
+                    notification_map[action],
+                    {
+                        "sessionId": session_id,
+                        "conversationId": row["conversation_id"],
+                        "startsAt": _datetime_text(new_starts_at),
+                        "actorName": user["name"],
+                        "status": new_status,
+                    },
+                )
+                _insert_system_message(
+                    cursor,
+                    row["conversation_id"],
+                    message_text,
+                    now,
+                )
+                cursor.execute(
+                    """
+                    UPDATE notifications
+                    SET read_at = UTC_TIMESTAMP()
+                    WHERE user_id = %s
+                      AND read_at IS NULL
+                      AND JSON_UNQUOTE(
+                            JSON_EXTRACT(payload, '$.sessionId')
+                          ) = %s
+                    """,
+                    (user_id, str(session_id)),
+                )
+
+    if conflict:
+        return json_error("CONFLICT", "This session changed. Refresh and try again.", 409)
+
+    _record_analytics(
+        notification_map[action],
+        {
+            "sessionId": session_id,
+            "conversationId": row["conversation_id"],
+            "status": new_status,
+        },
+        user_id=user_id,
+    )
+    return jsonify({"session": _session_payload(_session_row(session_id))})
+
+
+# ============================================================
+# Reports and blocks
+# ============================================================
+def _report_response(user_id, data, conversation_id=None, reported_user_id=None):
+    """Shared implementation for general and conversation-specific reports."""
+    fields = {}
+    if reported_user_id is None:
+        raw_reported = data.get("reportedUserId", data.get("reported_user_id"))
+        try:
+            reported_user_id = int(raw_reported)
+        except (TypeError, ValueError):
+            return validation_error({"reportedUserId": "Choose a valid person."})
+
+    if reported_user_id == user_id:
+        return validation_error({"reportedUserId": "You cannot report yourself."})
+    target = fetch_user_by_id(reported_user_id)
+    if not target or target["status"] != "active":
+        return json_error("NOT_FOUND", "That account was not found.", 404)
+    if _block_exists(user_id, reported_user_id):
+        return json_error(
+            "BLOCKED",
+            "You cannot report this person while a block is active.",
+            403,
+        )
+
+    reason = str(data.get("reason") or "").strip().lower()
+    if reason not in REPORT_REASONS:
+        fields["reason"] = "Choose a valid report reason."
+    details = str(data.get("details") or "").strip()
+    if len(details) > REPORT_DETAILS_MAX_LENGTH:
+        fields["details"] = (
+            f"Keep the details under {REPORT_DETAILS_MAX_LENGTH} characters."
+        )
+
+    if conversation_id is None:
+        raw_conversation = data.get("conversationId", data.get("conversation_id"))
+        if raw_conversation not in (None, ""):
+            try:
+                requested_conversation_id = int(raw_conversation)
+            except (TypeError, ValueError):
+                fields["conversationId"] = "Choose a valid conversation."
+            else:
+                conversation = _conversation_for_user(
+                    requested_conversation_id, user_id
+                )
+                if not conversation:
+                    return json_error("NOT_FOUND", "Conversation not found.", 404)
+                other_id = _other_user_id(conversation, user_id)
+                if other_id != reported_user_id:
+                    fields["reportedUserId"] = (
+                        "Choose the other participant in this conversation."
+                    )
+                conversation_id = requested_conversation_id
+    else:
+        conversation = _conversation_for_user(conversation_id, user_id)
+        if not conversation:
+            return json_error("NOT_FOUND", "Conversation not found.", 404)
+        if _other_user_id(conversation, user_id) != reported_user_id:
+            fields["reportedUserId"] = (
+                "Choose the other participant in this conversation."
+            )
+
+    if fields:
+        return validation_error(fields)
+
+    report_id = db.execute(
+        """
+        INSERT INTO reports
+            (reporter_id, reported_user_id, reason, details,
+             conversation_id, status)
+        VALUES (%s, %s, %s, %s, %s, 'open')
+        """,
+        (
+            user_id,
+            reported_user_id,
+            reason,
+            details or None,
+            conversation_id,
+        ),
+    )
+    _record_analytics(
+        "report_submitted",
+        {
+            "reportId": report_id,
+            "reason": reason,
+            "conversationId": conversation_id,
+        },
+        user_id=user_id,
+    )
+    return jsonify({"reportId": report_id, "status": "open"}), 201
+
+
+@app.post("/api/reports")
+@login_required
+def create_report():
+    """File a private safety report."""
+    return _report_response(session["user_id"], json_body())
+
+
+@app.post("/api/conversations/<int:conversation_id>/report")
+@login_required
+def report_conversation(conversation_id):
+    """File a report about the other participant in a conversation."""
+    user_id = session["user_id"]
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+    other_id = _other_user_id(conversation, user_id)
+    return _report_response(
+        user_id,
+        json_body(),
+        conversation_id=conversation_id,
+        reported_user_id=other_id,
+    )
+
+
+def _block_response(user_id, other_id):
+    """Block one user and make all shared conversations read-only."""
+    if other_id == user_id:
+        return validation_error({"userId": "You cannot block yourself."})
+    target = fetch_user_by_id(other_id)
+    if not target or target["status"] != "active":
+        return json_error("NOT_FOUND", "That account was not found.", 404)
+
+    now = now_utc()
+    db.execute(
+        "INSERT IGNORE INTO blocks (blocker_id, blocked_id) VALUES (%s, %s)",
+        (user_id, other_id),
+    )
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE conversations
+                SET status = 'blocked'
+                WHERE status = 'active'
+                  AND (
+                    (user_a_id = %s AND user_b_id = %s)
+                    OR (user_a_id = %s AND user_b_id = %s)
+                  )
+                """,
+                (user_id, other_id, other_id, user_id),
+            )
+            cursor.execute(
+                """
+                UPDATE match_requests
+                SET status = 'cancelled', responded_at = %s, pending_key = NULL
+                WHERE status = 'pending'
+                  AND (
+                    (from_user_id = %s AND to_user_id = %s)
+                    OR (from_user_id = %s AND to_user_id = %s)
+                  )
+                """,
+                (now, user_id, other_id, other_id, user_id),
+            )
+    _record_analytics(
+        "block_created",
+        {"blockedUserId": other_id},
+        user_id=user_id,
+    )
+    return "", 204
+
+
+@app.post("/api/blocks/<int:user_id>")
+@login_required
+def block_user(user_id):
+    """Block a user by account ID."""
+    return _block_response(session["user_id"], user_id)
+
+
+@app.post("/api/conversations/<int:conversation_id>/block")
+@login_required
+def block_conversation(conversation_id):
+    """Block the other participant in a conversation."""
+    user_id = session["user_id"]
+    conversation = _conversation_for_user(conversation_id, user_id)
+    if not conversation:
+        return json_error("NOT_FOUND", "Conversation not found.", 404)
+    return _block_response(user_id, _other_user_id(conversation, user_id))
+
+
+@app.delete("/api/blocks/<int:user_id>")
+@login_required
+def unblock_user(user_id):
+    """Remove a block and reopen shared conversations when safe."""
+    user_id_current = session["user_id"]
+    if user_id == user_id_current:
+        return validation_error({"userId": "You cannot unblock yourself."})
+    deleted = db.execute(
+        "DELETE FROM blocks WHERE blocker_id = %s AND blocked_id = %s",
+        (user_id_current, user_id),
+    )
+    del deleted
+    other_block = db.query_one(
+        """
+        SELECT 1 AS blocked
+        FROM blocks
+        WHERE blocker_id = %s AND blocked_id = %s
+        """,
+        (user_id, user_id_current),
+    )
+    if not other_block:
+        db.execute(
+            """
+            UPDATE conversations
+            SET status = 'active'
+            WHERE status = 'blocked'
+              AND (
+                (user_a_id = %s AND user_b_id = %s)
+                OR (user_a_id = %s AND user_b_id = %s)
+              )
+            """,
+            (user_id_current, user_id, user_id, user_id_current),
+        )
+    _record_analytics(
+        "block_removed",
+        {"blockedUserId": user_id},
+        user_id=user_id_current,
+    )
+    return "", 204
+
+
+@app.get("/api/blocks")
+@login_required
+def list_blocks():
+    """Return only the current user's private blocked list."""
+    rows = db.query_all(
+        """
+        SELECT b.blocked_id, b.created_at, u.role, u.name, p.photo_url
+        FROM blocks b
+        JOIN users u ON u.id = b.blocked_id
+        LEFT JOIN profiles p ON p.user_id = u.id
+        WHERE b.blocker_id = %s AND u.status = 'active'
+        ORDER BY b.created_at DESC, b.blocked_id DESC
+        """,
+        (session["user_id"],),
+    )
+    return jsonify({
+        "blocks": [
+            {
+                "userId": row["blocked_id"],
+                "name": row["name"],
+                "role": row["role"],
+                "photoUrl": row["photo_url"],
+                "blockedAt": _datetime_text(row["created_at"]),
+            }
+            for row in rows
+        ]
+    })
+
+
+# ============================================================
+# Analytics events
+# ============================================================
+@app.post("/api/events")
+@login_required
+def create_event():
+    """Record one non-sensitive product/evaluation event."""
+    data = json_body()
+    name = str(data.get("name") or "").strip().lower()
+    if name not in ANALYTICS_EVENTS:
+        return validation_error({"name": "Choose a valid event name."})
+    payload = data.get("payload") or {}
+    if not isinstance(payload, dict):
+        return validation_error({"payload": "Payload must be an object."})
+    cleaned = _clean_analytics_payload(payload)
+    try:
+        encoded = json.dumps(cleaned, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return validation_error({"payload": "Payload is not valid JSON."})
+    if len(encoded.encode("utf-8")) > ANALYTICS_PAYLOAD_MAX_BYTES:
+        return validation_error({"payload": "Payload is too large."})
+    db.execute(
+        """
+        INSERT INTO analytics_events (user_id, name, payload)
+        VALUES (%s, %s, %s)
+        """,
+        (session["user_id"], name, encoded),
+    )
+    return "", 204
+
+
+@app.get("/api/analytics/summary")
+@login_required
+def analytics_summary():
+    """Admin-only aggregate metrics for the capstone evaluation."""
+    user = fetch_user_by_id(session["user_id"])
+    if not user or user["role"] != "admin":
+        return json_error("FORBIDDEN", "Admin access is required.", 403)
+
+    request_rows = db.query_all(
+        "SELECT status, COUNT(*) AS total FROM match_requests GROUP BY status"
+    )
+    request_counts = {row["status"]: row["total"] for row in request_rows}
+    total_requests = sum(request_counts.values())
+
+    session_rows = db.query_all(
+        "SELECT status, COUNT(*) AS total FROM session_proposals GROUP BY status"
+    )
+    session_counts = {row["status"]: row["total"] for row in session_rows}
+    total_sessions = sum(session_counts.values())
+
+    report_rows = db.query_all(
+        "SELECT status, COUNT(*) AS total FROM reports GROUP BY status"
+    )
+    report_counts = {row["status"]: row["total"] for row in report_rows}
+
+    user_rows = db.query_all(
+        """
+        SELECT role, COUNT(*) AS total
+        FROM users
+        WHERE status = 'active'
+        GROUP BY role
+        """
+    )
+    user_counts = {row["role"]: row["total"] for row in user_rows}
+
+    event_rows = db.query_all(
+        """
+        SELECT name, COUNT(*) AS total
+        FROM analytics_events
+        WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY
+        GROUP BY name
+        ORDER BY total DESC, name ASC
+        """
+    )
+    message_row = db.query_one("SELECT COUNT(*) AS total FROM messages")
+
+    accepted = request_counts.get("accepted", 0)
+    completed = session_counts.get("completed", 0)
+    return jsonify({
+        "generatedAt": _datetime_text(now_utc()),
+        "users": user_counts,
+        "requests": {
+            "byStatus": request_counts,
+            "total": total_requests,
+            "acceptanceRate": round(accepted / total_requests, 4)
+            if total_requests
+            else 0,
+        },
+        "sessions": {
+            "byStatus": session_counts,
+            "total": total_sessions,
+            "completionRate": round(completed / total_sessions, 4)
+            if total_sessions
+            else 0,
+        },
+        "reports": {
+            "byStatus": report_counts,
+            "total": sum(report_counts.values()),
+        },
+        "messages": {"total": message_row["total"] if message_row else 0},
+        "analyticsEventsLast30Days": {
+            row["name"]: row["total"] for row in event_rows
+        },
     })
 
 
