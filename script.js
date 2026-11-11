@@ -618,7 +618,7 @@
       if (err.code === 'EMAIL_NOT_VERIFIED') {
         openVerify(
           email,
-          'Verify your email to finish signing in. In demo mode the code is in the Flask terminal or outbox.log.'
+          'Verify your email to finish signing in. We sent a new code to your email.'
         );
         return;
       }
