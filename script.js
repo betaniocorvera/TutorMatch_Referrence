@@ -252,6 +252,85 @@
     reset: resetForm
   };
 
+  /* ---------- Google reCAPTCHA v2 (login only) ----------
+     The site key arrives from /api/public-config.js so it can live
+     in .env. With no key the widget stays hidden and the server
+     skips verification. */
+  const loginCaptcha = (() => {
+    const slot = $('#login-captcha');
+    const siteKey = ((window.TUTORMATCH_CONFIG || {}).recaptchaSiteKey || '').trim();
+    let widgetId = null;
+    let loader = null;
+
+    function enabled() {
+      return Boolean(slot && siteKey);
+    }
+
+    function load() {
+      if (window.grecaptcha && typeof window.grecaptcha.render === 'function') {
+        return Promise.resolve();
+      }
+      if (loader) return loader;
+      loader = new Promise((resolve, reject) => {
+        window.__tmRecaptchaReady = () => resolve();
+        const script = document.createElement('script');
+        script.src = 'https://www.google.com/recaptcha/api.js'
+          + '?onload=__tmRecaptchaReady&render=explicit&hl=en';
+        script.async = true;
+        script.defer = true;
+        script.onerror = () => reject(new Error('reCAPTCHA failed to load'));
+        document.head.appendChild(script);
+      }).catch((error) => {
+        loader = null;
+        throw error;
+      });
+      return loader;
+    }
+
+    async function show() {
+      if (!enabled() || widgetId !== null) return;
+      slot.classList.remove('hidden');
+      slot.classList.add('flex');
+      try {
+        await load();
+      } catch (error) {
+        setStatus(
+          'login-status',
+          'error',
+          'The robot check could not load. Check your internet connection and reload.'
+        );
+        return;
+      }
+      // A hidden tab has no layout box, so wait until it is visible.
+      if (widgetId !== null || slot.offsetParent === null) return;
+      if (!window.grecaptcha || typeof window.grecaptcha.render !== 'function') return;
+      widgetId = window.grecaptcha.render(slot, {
+        sitekey: siteKey,
+        theme: 'light'
+      });
+    }
+
+    function token() {
+      if (!enabled() || widgetId === null || !window.grecaptcha) return '';
+      try {
+        return window.grecaptcha.getResponse(widgetId) || '';
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function reset() {
+      if (widgetId === null || !window.grecaptcha) return;
+      try {
+        window.grecaptcha.reset(widgetId);
+      } catch (error) {
+        /* The widget was rebuilt; nothing to reset. */
+      }
+    }
+
+    return { enabled, show, token, reset };
+  })();
+
   const COPY = {
     login: {
       lead: 'Welcome', accent: 'back.',
@@ -322,6 +401,11 @@
         .find((el) => el.offsetParent !== null);
       if (firstField) firstField.focus();
     }
+
+    if (target === 'login') {
+      // Wait a frame so the tab is visible before Google measures it.
+      setTimeout(() => loginCaptcha.show(), 60);
+    }
   }
 
   function openAuth(tab = 'login', trigger = null) {
@@ -388,6 +472,7 @@
     setRole('student');
     fillCsrfInputs();
     updateStrength('');
+    loginCaptcha.reset();
     setTab('login', { focus: false });
     clearAuthQuery();
     if (lastTrigger && document.contains(lastTrigger) && lastTrigger.offsetParent !== null) lastTrigger.focus();
@@ -604,12 +689,18 @@
     if (!password)       ok = setError('login-password', 'Enter your password.') && ok;
     if (!ok) { $('[aria-invalid="true"]', loginForm)?.focus(); return; }
 
+    if (loginCaptcha.enabled() && !loginCaptcha.token()) {
+      setStatus('login-status', 'error', 'Please tick the \u201cI\u2019m not a robot\u201d box.');
+      return;
+    }
+
     setBusy(loginForm, true);
     try {
       const result = await auth.login({
         email,
         password,
-        remember: $('#login-remember').checked
+        remember: $('#login-remember').checked,
+        captchaToken: loginCaptcha.token()
       });
       window.location.href = result && result.onboardingRequired
         ? 'onboarding.html'
@@ -627,6 +718,7 @@
         password: 'login-password'
       });
     } finally {
+      loginCaptcha.reset();
       setBusy(loginForm, false);
     }
   });

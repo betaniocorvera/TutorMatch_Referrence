@@ -14,9 +14,12 @@
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -53,6 +56,51 @@ def get_client_ip():
 def get_user_agent():
     """Browser string, shortened to fit the database column."""
     return (request.headers.get("User-Agent") or "")[:255]
+
+
+# ------------------------------------------------------------
+# CAPTCHA — Google reCAPTCHA v2
+# ------------------------------------------------------------
+RECAPTCHA_VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify"
+
+
+def verify_recaptcha(token, remote_ip=None):
+    """
+    Ask Google whether a reCAPTCHA v2 token is valid.
+    Returns (ok, reason). With no secret key configured the check is
+    skipped so local development works without keys.
+    """
+    secret = (os.getenv("RECAPTCHA_SECRET_KEY") or "").strip()
+    if not secret:
+        return True, "not configured"
+
+    token = (token or "").strip()
+    if not token:
+        return False, "missing token"
+
+    payload = {"secret": secret, "response": token}
+    if remote_ip:
+        payload["remoteip"] = remote_ip
+
+    body = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(
+        RECAPTCHA_VERIFY_URL,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        # Fail closed: a CAPTCHA we cannot verify must not let a login through.
+        print(f"[security] reCAPTCHA verification failed: {exc}")
+        return False, "verification unavailable"
+
+    if result.get("success"):
+        return True, "ok"
+    codes = ",".join(result.get("error-codes") or ["invalid token"])
+    return False, codes
 
 
 # ------------------------------------------------------------

@@ -436,6 +436,9 @@
 
           <p id="login-status" class="form-status" role="alert" aria-live="polite"></p>
 
+          <!-- Google reCAPTCHA v2 — login only, rendered by script.js -->
+          <div id="login-captcha" class="hidden justify-center"></div>
+
           <button type="submit" class="submit-btn group">
             <span>Log In</span>
             <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
@@ -629,6 +632,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" data-show="false"></div>
 
+  <script src="/api/public-config.js"></script>
   <script src="js/auth.js"></script>
   <script src="script.js"></script>
 </body>

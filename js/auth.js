@@ -281,10 +281,15 @@
     return (data && data.levels) || [];
   }
 
-  async function login({ email, password, remember }) {
+  async function login({ email, password, remember, captchaToken }) {
     const data = await apiFetch('/api/auth/login', {
       method: 'POST',
-      body: { email, password, remember: !!remember }
+      body: {
+        email,
+        password,
+        remember: !!remember,
+        captchaToken: captchaToken || ''
+      }
     });
     setSessionUser(data && data.user);
     return data;

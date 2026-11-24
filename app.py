@@ -50,6 +50,7 @@ from security import (
     session_expired,
     start_user_session,
     verify_password,
+    verify_recaptcha,
 )
 
 # Load .env BEFORE reading any environment variable.
@@ -216,12 +217,14 @@ mailer.init_mail(app)
 CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-    "https://cdn.tailwindcss.com https://unpkg.com; "
+    "https://cdn.tailwindcss.com https://unpkg.com "
+    "https://www.google.com https://www.gstatic.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
     "media-src 'self' https://strvid.nyc3.cdn.digitaloceanspaces.com; "
-    "connect-src 'self'; "
+    "connect-src 'self' https://www.google.com; "
+    "frame-src https://www.google.com https://recaptcha.google.com; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "
@@ -2262,6 +2265,21 @@ def health():
     return jsonify({"ok": False}), 503
 
 
+@app.get("/api/public-config.js")
+def public_config():
+    """
+    Public runtime settings for the page.
+    Only the reCAPTCHA site key is exposed — never the secret key.
+    """
+    site_key = (os.getenv("RECAPTCHA_SITE_KEY") or "").strip()
+    body = "window.TUTORMATCH_CONFIG = " + json.dumps(
+        {"recaptchaSiteKey": site_key}
+    ) + ";\n"
+    response = app.response_class(body, mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/api/auth/me")
 def auth_me():
     """
@@ -2411,6 +2429,23 @@ def auth_login():
         fields["password"] = "Enter your password."
     if fields:
         return validation_error(fields)
+
+    # CAPTCHA before any account lookup so bots cannot probe emails.
+    captcha_ok, captcha_reason = verify_recaptcha(
+        data.get("captchaToken"),
+        get_client_ip(),
+    )
+    if not captcha_ok:
+        log_event(
+            "captcha_failed",
+            email_tried=email,
+            details=f"login: {captcha_reason}",
+        )
+        return json_error(
+            "CAPTCHA_FAILED",
+            "Please complete the \u201cI\u2019m not a robot\u201d check and try again.",
+            400,
+        )
 
     user = fetch_user_by_email(email)
     if not user:
