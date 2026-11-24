@@ -67,8 +67,19 @@ load_dotenv(BASE_DIR / ".env")
 # ============================================================
 # SETTINGS — change these values for your demo
 # ============================================================
-MAX_LOGIN_ATTEMPTS = 5          # wrong passwords before lockout
-LOCKOUT_MINUTES = 15            # how long the account stays locked
+# Lockout tiers: (total failed logins, lock in seconds).
+#   3 wrong  -> 15 seconds
+#   6 wrong  -> 30 seconds
+#   9 wrong  -> 60 seconds
+#  12 wrong  -> full 15-minute lock
+# When the full lock expires the counter restarts at tier 1.
+LOCKOUT_TIERS = (
+    (3, 15),
+    (6, 30),
+    (9, 60),
+    (12, 15 * 60),
+)
+FULL_LOCKOUT_SECONDS = LOCKOUT_TIERS[-1][1]
 OTP_EXPIRY_MINUTES = 5          # verification code lifetime
 OTP_MAX_ATTEMPTS = 5            # wrong code tries before it is burned
 OTP_RESEND_SECONDS = 60         # minimum wait between code requests
@@ -483,12 +494,37 @@ def has_security_questions(user_id):
     return len(get_security_questions(user_id)) == SECURITY_QUESTION_COUNT
 
 
+def lockout_seconds_for(attempts):
+    """
+    Return the lock duration for this failure count, or None.
+
+    Locks only fire on the 3rd, 6th, 9th, and 12th failure. The
+    12th and every failure after it use the full 15-minute lock.
+    """
+    if attempts >= LOCKOUT_TIERS[-1][0]:
+        return FULL_LOCKOUT_SECONDS
+    for threshold, duration in LOCKOUT_TIERS:
+        if attempts == threshold:
+            return duration
+    return None
+
+
+def format_duration(seconds):
+    """Human text for a lock time. 60 or less stays in seconds."""
+    seconds = max(1, int(round(seconds)))
+    if seconds <= 60:
+        return f"{seconds} second{'s' if seconds != 1 else ''}"
+    minutes = max(1, int(math.ceil(seconds / 60)))
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+
 def record_failed_login(user, email):
-    """Increment the counter and lock the account after too many tries."""
+    """Increment the counter and apply the matching lockout tier."""
     attempts = int(user.get("failed_attempts") or 0) + 1
-    locked_until = None
-    if attempts >= MAX_LOGIN_ATTEMPTS:
-        locked_until = now_utc() + timedelta(minutes=LOCKOUT_MINUTES)
+    lock_seconds = lockout_seconds_for(attempts)
+    locked_until = (
+        now_utc() + timedelta(seconds=lock_seconds) if lock_seconds else None
+    )
 
     db.execute(
         """
@@ -510,16 +546,22 @@ def record_failed_login(user, email):
             "account_locked",
             user_id=user["id"],
             email_tried=email,
-            details=f"locked for {LOCKOUT_MINUTES} minutes",
+            details=(
+                f"locked for {format_duration(lock_seconds)} "
+                f"after attempt {attempts}"
+            ),
         )
-        mailer.send_security_alert(
-            user["email"],
-            user["name"],
-            "account locked after repeated failed logins",
-            get_client_ip(),
-            get_user_agent(),
-            now_utc().isoformat(),
-        )
+        # Only the full 15-minute lock sends an email. A 15-second
+        # lock would otherwise flood the inbox.
+        if lock_seconds >= FULL_LOCKOUT_SECONDS:
+            mailer.send_security_alert(
+                user["email"],
+                user["name"],
+                "account locked after repeated failed logins",
+                get_client_ip(),
+                get_user_agent(),
+                now_utc().isoformat(),
+            )
 
 
 def clear_login_failures(user_id):
@@ -2513,18 +2555,33 @@ def auth_login():
         return json_error("FORBIDDEN", "This account is suspended.", 403)
 
     locked_until = user.get("locked_until")
-    if locked_until and locked_until > now_utc():
+    now = now_utc()
+    if locked_until and locked_until > now:
+        remaining = (locked_until - now).total_seconds()
+        # Logged as login_locked, not login_failed: a rejected attempt
+        # during a lock must not count toward the per-IP failure limit.
         log_event(
-            "login_failed",
+            "login_locked",
             user_id=user["id"],
             email_tried=email,
             details="account locked",
         )
         return json_error(
             "LOCKED",
-            f"Too many wrong passwords. Try again in {LOCKOUT_MINUTES} minutes.",
+            f"Too many wrong passwords. Try again in "
+            f"{format_duration(remaining)}.",
             423,
         )
+
+    # The full 15-minute lock is the last tier. Once it expires the
+    # counter starts over, so the next 3 mistakes lock for 15 seconds.
+    if (
+        locked_until
+        and int(user.get("failed_attempts") or 0) >= LOCKOUT_TIERS[-1][0]
+    ):
+        clear_login_failures(user["id"])
+        user["failed_attempts"] = 0
+        user["locked_until"] = None
 
     if not verify_password(user["password_hash"], password):
         record_failed_login(user, email)

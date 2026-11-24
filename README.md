@@ -83,6 +83,7 @@ The seeder creates 4 tutor and 4 student profiles from `mock/seed.json`. Demo ac
 - **Logout** — clears the server session.
 - **Sessions** — Flask session cookie is the source of truth. The dashboard calls `/api/auth/me` before initializing. A normal login uses a sliding idle timeout (`SESSION_IDLE_TIMEOUT_SECONDS` in `app.py`); background notification/message polls do not keep an idle tab alive. "Keep me signed in" uses a fixed 7-day lifetime.
 - **CSRF** — every write sends `X-CSRFToken`; the client fetches it from `/api/csrf` and retries once if the session token expired.
+- **Lockout tiers** — 3 wrong passwords locks for 15 seconds; 3 more for 30 seconds; 3 more for 60 seconds; 3 more for a full 15-minute lock. When the 15-minute lock expires the counter restarts at tier 1. Attempts made during a lock are rejected without counting, and a successful login clears the counter.
 - **Security log** — registrations, logins, lockouts, OTP events, resets, and rate-limit hits are appended to `security_events`.
 
 In development, read the latest OTP or reset link from the Flask terminal or `outbox.log`. The API never returns OTPs or reset tokens.
