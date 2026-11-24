@@ -39,6 +39,53 @@ OTP_LENGTH = 6
 
 
 # ------------------------------------------------------------
+# Account recovery questions
+#
+# The bank below is a placeholder. Replace the tuple with the
+# final Section 5 list from the project paper. Keys are stored
+# in the database, so keep a key stable when the wording changes.
+# ------------------------------------------------------------
+SECURITY_QUESTIONS = (
+    ("childhood_street", "What was the name of the street you grew up on?"),
+    ("first_pet", "What was the name of your first pet?"),
+    ("mother_maiden", "What is your mother's maiden name?"),
+    ("first_school", "What elementary school did you attend?"),
+    ("childhood_nickname", "What was your childhood nickname?"),
+    ("favorite_teacher", "What was the name of your favorite teacher?"),
+    ("first_job", "What was the name of your first employer?"),
+    ("birth_city", "In what city or town were you born?"),
+    ("favorite_food", "What is your favorite home-cooked food?"),
+    ("childhood_friend", "What was the first name of your best childhood friend?"),
+)
+SECURITY_QUESTION_COUNT = 3
+SECURITY_ANSWER_MIN_LENGTH = 2
+SECURITY_ANSWER_MAX_LENGTH = 100
+
+
+def security_question_text(key):
+    """Return the wording for a bank key, or None."""
+    for question_key, text in SECURITY_QUESTIONS:
+        if question_key == key:
+            return text
+    return None
+
+
+def normalize_security_answer(value):
+    """Compare answers while ignoring case and extra spaces."""
+    return " ".join(str(value or "").split()).lower()
+
+
+def security_answer_error(value):
+    """Return an error message, or None when the answer is usable."""
+    answer = normalize_security_answer(value)
+    if len(answer) < SECURITY_ANSWER_MIN_LENGTH:
+        return "Enter an answer with at least 2 characters."
+    if len(answer) > SECURITY_ANSWER_MAX_LENGTH:
+        return "Keep each answer under 100 characters."
+    return None
+
+
+# ------------------------------------------------------------
 # Time and request context
 # ------------------------------------------------------------
 def now_utc():

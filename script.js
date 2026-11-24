@@ -441,6 +441,7 @@
     if (resetTokenInput) resetTokenInput.value = resetToken;
     openAuth('reset');
     if (message) setStatus('reset-status', 'success', message);
+    loadResetQuestions(resetToken);
   }
 
   function clearAuthQuery() {
@@ -472,6 +473,7 @@
     setRole('student');
     fillCsrfInputs();
     updateStrength('');
+    clearResetQuestions();
     loginCaptcha.reset();
     setTab('login', { focus: false });
     clearAuthQuery();
@@ -831,6 +833,64 @@
     }
   });
 
+  /* ---------- Recovery questions on the reset form ---------- */
+  function clearResetQuestions() {
+    const box = $('#reset-questions');
+    const fields = $('#reset-question-fields');
+    if (fields) fields.innerHTML = '';
+    if (box) box.classList.add('hidden');
+  }
+
+  async function loadResetQuestions(token) {
+    clearResetQuestions();
+    if (!token) return;
+    try {
+      const data = await auth.getResetContext(token);
+      const questions = (data && data.questions) || [];
+      if (!questions.length) return;
+
+      const fields = $('#reset-question-fields');
+      questions.forEach((question, index) => {
+        const wrapper = document.createElement('div');
+        const label = document.createElement('label');
+        label.className = 'field-label';
+        label.setAttribute('for', `reset-answer-${index}`);
+        label.textContent = question.text;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'field-wrap';
+        const icon = document.createElement('i');
+        icon.className = 'field-icon';
+        icon.setAttribute('data-lucide', 'help-circle');
+        const input = document.createElement('input');
+        input.id = `reset-answer-${index}`;
+        input.type = 'text';
+        input.className = 'field';
+        input.maxLength = 100;
+        input.autocomplete = 'off';
+        input.placeholder = 'Your answer';
+        input.dataset.questionKey = question.key;
+        wrap.appendChild(icon);
+        wrap.appendChild(input);
+
+        const error = document.createElement('p');
+        error.className = 'field-error';
+        error.setAttribute('data-error-for', `reset-answer-${index}`);
+        error.setAttribute('role', 'alert');
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(wrap);
+        wrapper.appendChild(error);
+        fields.appendChild(wrapper);
+      });
+
+      $('#reset-questions').classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    } catch (error) {
+      /* The reset form still works if the context cannot load. */
+    }
+  }
+
   /* ---------- Reset password submit ---------- */
   resetForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -851,6 +911,17 @@
     if (confirm !== password || !confirm) {
       ok = setError('reset-confirm', 'Passwords don\u2019t match.') && ok;
     }
+
+    const answerInputs = $$('#reset-question-fields input[data-question-key]');
+    const answers = answerInputs.map((input) => ({
+      key: input.dataset.questionKey,
+      answer: input.value.trim()
+    }));
+    if (answers.length && answers.some((item) => !item.answer)) {
+      setStatus('reset-status', 'error', 'Answer all 3 recovery questions.');
+      ok = false;
+    }
+
     if (!ok) {
       $('[aria-invalid="true"]', resetForm)?.focus();
       return;
@@ -858,10 +929,11 @@
 
     setBusy(resetForm, true);
     try {
-      const data = await auth.resetPassword({ token, password });
+      const data = await auth.resetPassword({ token, password, answers });
       auth.clearSession();
       renderAuthState();
       resetForm.reset();
+      clearResetQuestions();
       resetToken = '';
       clearAuthQuery();
       setTab('login', { focus: false });

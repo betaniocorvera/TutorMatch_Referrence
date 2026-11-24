@@ -15,7 +15,8 @@
     { id: 4, label: 'Availability', hint: 'When you are free' },
     { id: 5, label: 'Rate & format', hint: 'Budget and session type' },
     { id: 6, label: 'Area', hint: 'Barangay-level only' },
-    { id: 7, label: 'Preview', hint: 'Review and finish' }
+    { id: 7, label: 'Preview', hint: 'Review and finish' },
+    { id: 8, label: 'Recovery', hint: '3 security questions' }
   ];
 
   const LEVELS = [
@@ -65,6 +66,8 @@
   const state = {
     profile: null,
     catalog: [],
+    securityBank: [],
+    savedSecurityKeys: [],
     subjectQuery: '',
     step: 1,
     maxStep: 1,
@@ -231,6 +234,7 @@
       city: ['#ob-city'],
       format: ['#format-options'],
       subjects: ['#subject-list'],
+      securityQuestions: ['#ob-security-key-1', '#ob-security-key-2', '#ob-security-key-3'],
       availability: ['#availability-grid']
     };
     (map[field] || []).forEach((selector) => {
@@ -275,7 +279,8 @@
       area: 6,
       city: 6,
       profile: 7,
-      onboardingStep: 7
+      securityQuestions: 8,
+      onboardingStep: 8
     };
     return map[field] || 0;
   }
@@ -422,8 +427,8 @@
     const counter = $('#step-counter');
     const fill = $('#wizard-progress-fill');
     const track = $('.wizard-progress');
-    if (counter) counter.textContent = `Step ${state.step} of 7`;
-    if (fill) fill.style.width = `${(state.step / 7) * 100}%`;
+    if (counter) counter.textContent = `Step ${state.step} of 8`;
+    if (fill) fill.style.width = `${(state.step / 8) * 100}%`;
     if (track) track.setAttribute('aria-valuenow', String(state.step));
   }
 
@@ -626,6 +631,83 @@
     if (city) city.value = (state.profile.area && state.profile.area.city) || 'Cabadbaran City';
   }
 
+  function renderSecurityStep() {
+    const selects = $$('[data-security-key]');
+    if (!selects.length) return;
+    const saved = (state.savedSecurityKeys || []).slice(0, selects.length);
+    selects.forEach((select, index) => {
+      const current = select.value || saved[index] || '';
+      const options = ['<option value="">Choose a question</option>'];
+      (state.securityBank || []).forEach((question) => {
+        options.push(
+          `<option value="${escapeHtml(question.key)}">${escapeHtml(question.text)}</option>`
+        );
+      });
+      select.innerHTML = options.join('');
+      select.value = current;
+    });
+    refreshSecurityOptions();
+  }
+
+  function refreshSecurityOptions() {
+    const selects = $$('[data-security-key]');
+    const chosen = selects.map((select) => select.value).filter(Boolean);
+    selects.forEach((select) => {
+      Array.from(select.options).forEach((option) => {
+        if (!option.value) return;
+        option.disabled = option.value !== select.value && chosen.includes(option.value);
+      });
+    });
+  }
+
+  function securityAnswersFromForm() {
+    return $$('[data-security-key]').map((select) => {
+      const slot = select.dataset.securityKey;
+      const answer = $(`#ob-security-answer-${slot}`);
+      return {
+        key: select.value,
+        answer: answer ? answer.value.trim() : ''
+      };
+    });
+  }
+
+  function validateSecurityStep() {
+    if ((state.securityBank || []).length < 3) {
+      setFieldError(
+        'securityQuestions',
+        'Could not load the question list. Reload the page.'
+      );
+      return false;
+    }
+
+    const answers = securityAnswersFromForm();
+    if (answers.length !== 3 || answers.some((item) => !item.key)) {
+      setFieldError('securityQuestions', 'Choose 3 different questions.');
+      return false;
+    }
+    if (new Set(answers.map((item) => item.key)).size !== 3) {
+      setFieldError('securityQuestions', 'Choose 3 different questions.');
+      return false;
+    }
+
+    const savedKeys = state.savedSecurityKeys || [];
+    for (const item of answers) {
+      if (!item.answer && savedKeys.includes(item.key)) continue;
+      if (item.answer.length < 2) {
+        setFieldError(
+          'securityQuestions',
+          'Enter an answer for each question (at least 2 characters).'
+        );
+        return false;
+      }
+      if (item.answer.length > 100) {
+        setFieldError('securityQuestions', 'Keep each answer under 100 characters.');
+        return false;
+      }
+    }
+    return true;
+  }
+
   function renderPreview() {
     const target = $('#preview-root');
     if (!target || !state.profile) return;
@@ -752,6 +834,7 @@
     renderFormat();
     renderPriceFields();
     renderArea();
+    renderSecurityStep();
     renderPreview();
     renderCompleteness();
     const search = $('#subject-search');
@@ -759,7 +842,7 @@
   }
 
   function goToStep(step, options = {}) {
-    const next = clamp(Number(step) || 1, 1, 7);
+    const next = clamp(Number(step) || 1, 1, 8);
     state.step = next;
 
     $$('.step-panel').forEach((panel) => {
@@ -773,13 +856,13 @@
     const finishButton = $('#finish-btn');
     const footerNote = $('#step-footer-note');
     if (nextButton) {
-      nextButton.classList.toggle('hidden', next === 7);
+      nextButton.classList.toggle('hidden', next === 8);
       nextButton.textContent = next === 6 ? 'Review profile' : 'Continue';
     }
-    if (finishButton) finishButton.classList.toggle('hidden', next !== 7);
+    if (finishButton) finishButton.classList.toggle('hidden', next !== 8);
     if (footerNote) {
-      footerNote.textContent = next === 7
-        ? 'You can edit this later.'
+      footerNote.textContent = next === 8
+        ? 'You can change these later in your profile.'
         : next === 3
           ? 'Optional step'
           : '';
@@ -800,6 +883,8 @@
       renderArea();
     } else if (next === 7) {
       renderPreview();
+    } else if (next === 8) {
+      renderSecurityStep();
     }
 
     renderCompleteness();
@@ -931,6 +1016,10 @@
       }
     }
 
+    if (step === 8 && !validateSecurityStep()) {
+      ok = false;
+    }
+
     if (!ok) {
       setStatus('Please fix the highlighted fields.', 'error');
       const firstInvalid = $('[aria-invalid="true"]');
@@ -1048,11 +1137,11 @@
 
   async function nextStep() {
     if (!validateStep(state.step)) return;
-    if (state.step === 7) {
+    if (state.step === 8) {
       await finish();
       return;
     }
-    const next = Math.min(7, state.step + 1);
+    const next = Math.min(8, state.step + 1);
     const ok = await saveStep({ nextStep: next });
     if (!ok) return;
     state.maxStep = Math.max(state.maxStep, next);
@@ -1086,6 +1175,7 @@
 
   async function finish() {
     if (!validateStep(7)) return;
+    if (!validateStep(8)) return;
 
     const profile = state.profile;
     const payload = {
@@ -1105,7 +1195,7 @@
         barangay: String(profile.area && profile.area.barangay || '').trim(),
         city: String(profile.area && profile.area.city || '').trim()
       },
-      onboardingStep: 7,
+      onboardingStep: 8,
       onboardingCompleted: true
     };
 
@@ -1119,6 +1209,9 @@
 
     setSaving('saving', 'Finishing…');
     try {
+      await auth.saveSecurityQuestions({
+        questions: securityAnswersFromForm()
+      });
       const saved = await auth.updateProfile(payload);
       state.profile = saved;
       auth.setProfileCompleteness(saved.completeness);
@@ -1431,6 +1524,16 @@
     document.addEventListener('click', handleClick);
     document.addEventListener('input', handleInput);
     document.addEventListener('change', handleChange);
+    document.addEventListener('change', (event) => {
+      if (!event.target.matches('[data-security-key]')) return;
+      const slot = event.target.dataset.securityKey;
+      const savedKey = (state.savedSecurityKeys || [])[Number(slot) - 1];
+      if (event.target.value !== savedKey) {
+        const answer = $(`#ob-security-answer-${slot}`);
+        if (answer) answer.value = '';
+      }
+      refreshSecurityOptions();
+    });
   }
 
   async function init() {
@@ -1445,9 +1548,11 @@
     state.edit = new URLSearchParams(global.location.search).has('edit');
 
     try {
-      const [profile, catalog] = await Promise.all([
+      const [profile, catalog, securityBank, savedQuestions] = await Promise.all([
         auth.fetchProfile(true),
-        auth.getSubjects()
+        auth.getSubjects(),
+        auth.getSecurityQuestionBank().catch(() => []),
+        auth.getMySecurityQuestions().catch(() => [])
       ]);
       if (!profile) throw new Error('Profile not found.');
 
@@ -1458,8 +1563,10 @@
 
       state.profile = profile;
       state.catalog = catalog || [];
-      state.step = state.edit ? 1 : clamp(Number(profile.onboardingStep) || 1, 1, 7);
-      state.maxStep = state.edit ? 7 : state.step;
+      state.securityBank = securityBank || [];
+      state.savedSecurityKeys = (savedQuestions || []).map((question) => question.key);
+      state.step = state.edit ? 1 : clamp(Number(profile.onboardingStep) || 1, 1, 8);
+      state.maxStep = state.edit ? 8 : state.step;
 
       renderAll();
       goToStep(state.step, { focus: false });

@@ -150,6 +150,62 @@ Request:
 
 Response is always `202` with a generic message so the endpoint does not reveal whether an account exists.
 
+### GET `/api/auth/security-questions`
+
+Returns the fixed account-recovery question bank. Answers are never returned.
+
+```json
+{
+  "questions": [
+    { "key": "childhood_street", "text": "What was the name of the street you grew up on?" }
+  ]
+}
+```
+
+### GET `/api/auth/reset-context?token=<token>`
+
+Returns the 3 question texts linked to a valid reset token, so the reset page can ask them.
+An invalid or expired token returns `{"required": false, "questions": []}`.
+
+### GET `/api/me/security-questions`
+
+Session required. Returns the questions this account already chose, without answers.
+
+### PUT `/api/me/security-questions`
+
+Session required. Saves exactly 3 different questions. Answers are normalized
+(case and spacing ignored) and hashed; an empty answer keeps the saved hash.
+
+```json
+{
+  "questions": [
+    { "key": "childhood_street", "answer": "Mabini Street" },
+    { "key": "first_pet", "answer": "Bantay" },
+    { "key": "mother_maiden", "answer": "Cruz" }
+  ]
+}
+```
+
+### POST `/api/auth/reset-password`
+
+Request:
+
+```json
+{
+  "token": "<reset token>",
+  "password": "NewPass123",
+  "answers": [
+    { "key": "childhood_street", "answer": "Mabini Street" },
+    { "key": "first_pet", "answer": "Bantay" },
+    { "key": "mother_maiden", "answer": "Cruz" }
+  ]
+}
+```
+
+When the account has 3 recovery questions, `answers` is required in addition to
+the emailed token. Wrong answers return `401 SECURITY_ANSWER_FAILED`; more than
+5 failures in 10 minutes per IP or account returns `429 RATE_LIMITED`.
+
 ## 5. Reference data
 
 ### GET `/api/subjects?q=calc`

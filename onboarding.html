@@ -67,8 +67,8 @@
       <div class="onboarding-layout">
         <aside class="step-rail" aria-label="Onboarding steps">
           <div class="step-rail-progress">
-            <span id="step-counter">Step 1 of 7</span>
-            <div class="wizard-progress" role="progressbar" aria-valuemin="1" aria-valuemax="7" aria-valuenow="1" aria-label="Onboarding progress">
+            <span id="step-counter">Step 1 of 8</span>
+            <div class="wizard-progress" role="progressbar" aria-valuemin="1" aria-valuemax="8" aria-valuenow="1" aria-label="Onboarding progress">
               <span id="wizard-progress-fill"></span>
             </div>
           </div>
@@ -293,6 +293,43 @@
 
               <div id="preview-root" class="preview-root"></div>
               <p id="finish-status" class="finish-status"></p>
+            </section>
+
+            <!-- Step 8: Account recovery -->
+            <section class="step-panel" data-panel="8">
+              <div class="step-head">
+                <p class="eyebrow">Step 8</p>
+                <h2 tabindex="-1">Account recovery</h2>
+                <p>Pick 3 different questions. You will answer them before a password reset.</p>
+              </div>
+
+              <div class="field-grid">
+                <div class="field-block">
+                  <label class="field-label" for="ob-security-key-1">Question 1</label>
+                  <select id="ob-security-key-1" class="ob-field" data-security-key="1"></select>
+                  <input id="ob-security-answer-1" class="ob-field" type="text" maxlength="100"
+                         autocomplete="off" placeholder="Your answer" data-security-answer="1" />
+                </div>
+                <div class="field-block">
+                  <label class="field-label" for="ob-security-key-2">Question 2</label>
+                  <select id="ob-security-key-2" class="ob-field" data-security-key="2"></select>
+                  <input id="ob-security-answer-2" class="ob-field" type="text" maxlength="100"
+                         autocomplete="off" placeholder="Your answer" data-security-answer="2" />
+                </div>
+                <div class="field-block field-block-wide">
+                  <label class="field-label" for="ob-security-key-3">Question 3</label>
+                  <select id="ob-security-key-3" class="ob-field" data-security-key="3"></select>
+                  <input id="ob-security-answer-3" class="ob-field" type="text" maxlength="100"
+                         autocomplete="off" placeholder="Your answer" data-security-answer="3" />
+                </div>
+              </div>
+
+              <p class="ob-error" data-error-for="securityQuestions"></p>
+
+              <p class="privacy-note">
+                <i data-lucide="shield-check" aria-hidden="true"></i>
+                Answers are hashed and never shown on your profile or to other users.
+              </p>
             </section>
           </div>
 

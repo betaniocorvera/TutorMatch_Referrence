@@ -584,6 +584,11 @@
         <form id="reset-form" class="mt-6 hidden space-y-4" role="tabpanel" novalidate>
           <input type="hidden" id="reset-token" name="token" value="" />
 
+          <div id="reset-questions" class="hidden space-y-3">
+            <p class="text-sm text-muted">Answer your 3 recovery questions to finish.</p>
+            <div id="reset-question-fields" class="space-y-3"></div>
+          </div>
+
           <div>
             <label for="reset-password" class="field-label">New password</label>
             <div class="field-wrap">

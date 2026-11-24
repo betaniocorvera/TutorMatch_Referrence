@@ -28,6 +28,8 @@ from flask import Flask, jsonify, redirect, request, send_from_directory, sessio
 import db
 import mailer
 from security import (
+    SECURITY_QUESTION_COUNT,
+    SECURITY_QUESTIONS,
     clean_name,
     clean_role,
     clear_user_session,
@@ -44,9 +46,12 @@ from security import (
     log_event,
     login_required,
     normalize_email,
+    normalize_security_answer,
     now_utc,
     password_error,
     safe_compare,
+    security_answer_error,
+    security_question_text,
     session_expired,
     start_user_session,
     verify_password,
@@ -430,6 +435,33 @@ def send_password_reset(user):
         details="password reset link",
     )
     return bool(sent)
+
+
+# ============================================================
+# Account recovery questions
+# ============================================================
+def get_security_questions(user_id):
+    """Return the chosen recovery questions, without the answers."""
+    rows = db.query_all(
+        """
+        SELECT slot, question_key
+        FROM user_security_questions
+        WHERE user_id = %s
+        ORDER BY slot
+        """,
+        (user_id,),
+    )
+    questions = []
+    for row in rows:
+        text = security_question_text(row["question_key"])
+        if text:
+            questions.append({"key": row["question_key"], "text": text})
+    return questions
+
+
+def has_security_questions(user_id):
+    """True when the account has the full set of recovery questions."""
+    return len(get_security_questions(user_id)) == SECURITY_QUESTION_COUNT
 
 
 def record_failed_login(user, email):
@@ -2790,6 +2822,80 @@ def auth_reset_password():
             400,
         )
 
+    # Recovery questions are a second check on top of the emailed
+    # link. Accounts created before the feature are skipped.
+    question_rows = db.query_all(
+        """
+        SELECT question_key, answer_hash
+        FROM user_security_questions
+        WHERE user_id = %s
+        ORDER BY slot
+        """,
+        (row["user_id"],),
+    )
+    if len(question_rows) == SECURITY_QUESTION_COUNT:
+        provided = {}
+        answers = data.get("answers")
+        if isinstance(answers, list):
+            for item in answers:
+                if isinstance(item, dict):
+                    provided[str(item.get("key") or "").strip()] = item.get(
+                        "answer"
+                    )
+
+        expected = {question["question_key"] for question in question_rows}
+        if set(provided) != expected:
+            return validation_error(
+                {"answers": "Answer all 3 recovery questions."},
+                "Answer all 3 recovery questions.",
+            )
+
+        if (
+            is_rate_limited("security_answer_failed", 5, 600)
+            or is_rate_limited(
+                "security_answer_failed", 5, 600, user_id=row["user_id"]
+            )
+        ):
+            log_event(
+                "rate_limited",
+                user_id=row["user_id"],
+                email_tried=row["email"],
+                details="security answers",
+            )
+            return json_error(
+                "RATE_LIMITED",
+                "Too many incorrect answers. Try again later.",
+                429,
+            )
+
+        answers_ok = all(
+            verify_password(
+                question["answer_hash"],
+                normalize_security_answer(
+                    provided.get(question["question_key"])
+                ),
+            )
+            for question in question_rows
+        )
+        if not answers_ok:
+            log_event(
+                "security_answer_failed",
+                user_id=row["user_id"],
+                email_tried=row["email"],
+                details="password reset",
+            )
+            return json_error(
+                "SECURITY_ANSWER_FAILED",
+                "One or more answers are incorrect.",
+                401,
+            )
+        log_event(
+            "security_answer_passed",
+            user_id=row["user_id"],
+            email_tried=row["email"],
+            details="password reset",
+        )
+
     db.execute(
         """
         UPDATE users
@@ -2838,6 +2944,49 @@ def auth_logout():
     return "", 204
 
 
+@app.get("/api/auth/security-questions")
+def security_question_bank():
+    """The fixed question bank users choose from. No answers here."""
+    return jsonify({
+        "questions": [
+            {"key": key, "text": text}
+            for key, text in SECURITY_QUESTIONS
+        ]
+    })
+
+
+@app.get("/api/auth/reset-context")
+def auth_reset_context():
+    """
+    Question texts for a valid reset token.
+    The token itself is the secret, so this does not reveal which
+    email addresses have accounts.
+    """
+    empty = {"required": False, "questions": []}
+    token = (request.args.get("token") or "").strip()
+    if not token:
+        return jsonify(empty)
+
+    row = db.query_one(
+        """
+        SELECT pr.user_id, pr.expires_at
+        FROM password_resets pr
+        WHERE pr.token_hash = %s AND pr.used_at IS NULL
+        ORDER BY pr.id DESC
+        LIMIT 1
+        """,
+        (hash_reset_token(token),),
+    )
+    if not row or row["expires_at"] < now_utc():
+        return jsonify(empty)
+
+    questions = get_security_questions(row["user_id"])
+    return jsonify({
+        "required": len(questions) == SECURITY_QUESTION_COUNT,
+        "questions": questions,
+    })
+
+
 # ============================================================
 # Profile and onboarding API
 # ============================================================
@@ -2884,6 +3033,98 @@ def my_profile():
     if not payload:
         return json_error("UNAUTHORIZED", "Please log in again.", 401)
     return jsonify({"profile": payload})
+
+
+@app.get("/api/me/security-questions")
+@login_required
+def my_security_questions():
+    """Questions this account already chose. Answers are never returned."""
+    return jsonify({"questions": get_security_questions(session["user_id"])})
+
+
+@app.put("/api/me/security-questions")
+@login_required
+def update_security_questions():
+    """Save 3 different questions. An empty answer keeps the saved hash."""
+    user_id = session["user_id"]
+    data = json_body()
+    items = data.get("questions")
+
+    existing = {
+        row["question_key"]: row["answer_hash"]
+        for row in db.query_all(
+            """
+            SELECT question_key, answer_hash
+            FROM user_security_questions
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+    }
+
+    fields = {}
+    parsed = []
+    if not isinstance(items, list) or len(items) != SECURITY_QUESTION_COUNT:
+        fields["securityQuestions"] = (
+            f"Choose {SECURITY_QUESTION_COUNT} different questions."
+        )
+    else:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()
+            if not security_question_text(key):
+                fields["securityQuestions"] = "Choose questions from the list."
+                continue
+
+            answer = normalize_security_answer(item.get("answer"))
+            if answer:
+                problem = security_answer_error(answer)
+                if problem:
+                    fields["securityQuestions"] = problem
+                    continue
+                parsed.append({
+                    "key": key,
+                    "answer_hash": hash_password(answer),
+                })
+            elif key in existing:
+                # The question was not changed, so keep the saved answer.
+                parsed.append({"key": key, "answer_hash": existing[key]})
+            else:
+                fields["securityQuestions"] = "Enter an answer for each question."
+
+        if "securityQuestions" not in fields:
+            keys = {item["key"] for item in parsed}
+            if len(keys) != SECURITY_QUESTION_COUNT:
+                fields["securityQuestions"] = "Choose 3 different questions."
+
+    if fields:
+        return validation_error(
+            fields,
+            "Choose 3 different recovery questions.",
+        )
+
+    with db.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM user_security_questions WHERE user_id = %s",
+                (user_id,),
+            )
+            for slot, item in enumerate(parsed, start=1):
+                cursor.execute(
+                    """
+                    INSERT INTO user_security_questions
+                        (user_id, slot, question_key, answer_hash)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (user_id, slot, item["key"], item["answer_hash"]),
+                )
+
+    log_event("security_questions_saved", user_id=user_id)
+    return jsonify({
+        "message": "Recovery questions saved.",
+        "questions": get_security_questions(user_id),
+    })
 
 
 @app.get("/api/me/completeness")
@@ -3069,7 +3310,7 @@ def update_my_profile():
         except (TypeError, ValueError):
             fields["onboardingStep"] = "Choose a valid step."
         else:
-            if step < 1 or step > 7:
+            if step < 1 or step > 8:
                 fields["onboardingStep"] = "Choose a valid step."
             else:
                 profile["onboarding_step"] = step
@@ -3094,10 +3335,20 @@ def update_my_profile():
             "Complete the required profile fields before finishing.",
         )
 
+    if finish and not has_security_questions(user_id):
+        return validation_error(
+            {
+                "securityQuestions": (
+                    f"Choose {SECURITY_QUESTION_COUNT} different recovery questions."
+                )
+            },
+            "Set up your 3 recovery questions before finishing.",
+        )
+
     completed_at = profile.get("onboarding_completed_at")
     if finish:
         completed_at = now_utc()
-        profile["onboarding_step"] = 7
+        profile["onboarding_step"] = 8
     elif not required_complete:
         completed_at = None
 

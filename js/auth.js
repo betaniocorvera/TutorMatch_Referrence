@@ -325,10 +325,33 @@
     });
   }
 
-  async function resetPassword({ token, password }) {
+  async function resetPassword({ token, password, answers }) {
     return apiFetch('/api/auth/reset-password', {
       method: 'POST',
-      body: { token, password }
+      body: { token, password, answers: answers || [] }
+    });
+  }
+
+  async function getResetContext(token) {
+    return apiFetch(
+      '/api/auth/reset-context?token=' + encodeURIComponent(token)
+    );
+  }
+
+  async function getSecurityQuestionBank() {
+    const data = await apiFetch('/api/auth/security-questions');
+    return (data && data.questions) || [];
+  }
+
+  async function getMySecurityQuestions() {
+    const data = await apiFetch('/api/me/security-questions');
+    return (data && data.questions) || [];
+  }
+
+  async function saveSecurityQuestions({ questions }) {
+    return apiFetch('/api/me/security-questions', {
+      method: 'PUT',
+      body: { questions }
     });
   }
 
@@ -541,6 +564,10 @@
     resendOtp,
     forgotPassword,
     resetPassword,
+    getResetContext,
+    getSecurityQuestionBank,
+    getMySecurityQuestions,
+    saveSecurityQuestions,
     logout,
     getRequests,
     loadSentRequests,

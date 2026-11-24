@@ -161,7 +161,7 @@ Search results and public profiles never expose email, birthdate, exact coordina
 - `script.js` - landing interactions and API-backed auth flows
 - `dashboard.html` - authenticated search dashboard shell
 - `dashboard.css` - dashboard and responsive styles
-- `onboarding.html` - seven-step profile wizard
+- `onboarding.html` - eight-step profile wizard (includes account recovery questions)
 - `onboarding.css` - onboarding-specific styles
 - `js/onboarding.js` - wizard state, autosave, validation, preview
 - `js/auth.js` - shared API client, CSRF handling, session validation, profile methods

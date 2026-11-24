@@ -100,6 +100,29 @@ CREATE TABLE IF NOT EXISTS password_resets (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
+-- 3b. user_security_questions
+-- The 3 recovery questions a user picked from the bank. Only
+-- the question key and a hashed answer are stored. Answers are
+-- never stored or returned in plain text.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_security_questions (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id      BIGINT UNSIGNED NOT NULL,
+  slot         TINYINT UNSIGNED NOT NULL,   -- 1, 2, or 3
+  question_key VARCHAR(40) NOT NULL,        -- stable key from the bank
+  answer_hash  VARCHAR(255) NOT NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                 ON UPDATE CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_usq_user_slot (user_id, slot),
+  UNIQUE KEY uq_usq_user_question (user_id, question_key),
+  CONSTRAINT fk_usq_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
 -- 4. security_events
 -- Append-only security log. It is the source for:
 --   - the admin dashboard
@@ -464,6 +487,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- DROP TABLE IF EXISTS conversations;
 -- DROP TABLE IF EXISTS match_requests;
 -- DROP TABLE IF EXISTS security_events;
+-- DROP TABLE IF EXISTS user_security_questions;
 -- DROP TABLE IF EXISTS password_resets;
 -- DROP TABLE IF EXISTS email_otps;
 -- DROP TABLE IF EXISTS users;
