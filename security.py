@@ -291,11 +291,14 @@ def csrf_token_is_valid():
 # ------------------------------------------------------------
 # Session helpers
 # ------------------------------------------------------------
-def start_user_session(user, timeout_minutes, remember=False):
+def start_user_session(user, timeout_seconds, remember=False):
     """
     Start a fresh session after login.
     session.clear() prevents session fixation. The CSRF token is
     preserved so the open page can keep making requests.
+
+    timeout_seconds is the idle window. Remember-me sessions use a
+    fixed long lifetime instead of a sliding one.
     """
     csrf = session.get(CSRF_SESSION_KEY)
     session.clear()
@@ -307,8 +310,9 @@ def start_user_session(user, timeout_minutes, remember=False):
     session["name"] = user["name"]
     session["session_version"] = user["session_version"]
     session["expires_at"] = (
-        now_utc() + timedelta(minutes=timeout_minutes)
+        now_utc() + timedelta(seconds=timeout_seconds)
     ).isoformat()
+    session["idle_seconds"] = 0 if remember else int(timeout_seconds)
     session.permanent = bool(remember)
     session.modified = True
 
@@ -330,6 +334,38 @@ def session_expired():
         return now_utc() > datetime.fromisoformat(expires_at)
     except ValueError:
         return True
+
+
+# Background pollers that must not keep an idle session alive.
+IDLE_EXEMPT_PREFIXES = (
+    "/api/notifications",
+    "/api/conversations",
+    "/api/requests",
+)
+
+
+def session_should_touch():
+    """
+    True when the request counts as real user activity.
+
+    The notification and message widgets poll every 20 seconds. If
+    those polls reset the timer, an empty tab would stay signed in
+    forever and the idle timeout would never fire.
+    """
+    if request.method != "GET":
+        return True
+    return not request.path.startswith(IDLE_EXEMPT_PREFIXES)
+
+
+def touch_user_session():
+    """Slide the idle expiry forward after real activity."""
+    idle_seconds = int(session.get("idle_seconds") or 0)
+    if idle_seconds <= 0:
+        return
+    session["expires_at"] = (
+        now_utc() + timedelta(seconds=idle_seconds)
+    ).isoformat()
+    session.modified = True
 
 
 def wants_json():

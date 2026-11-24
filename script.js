@@ -986,6 +986,13 @@
     openReset(initialResetToken);
   } else if (initialParams.get('login') === '1') {
     openAuth('login');
+    if (initialParams.get('expired') === '1') {
+      setStatus(
+        'login-status',
+        'error',
+        'Your session expired. Please log in again.'
+      );
+    }
   }
 
   auth.fetchMe().then(() => renderAuthState());

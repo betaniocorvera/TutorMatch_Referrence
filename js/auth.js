@@ -148,6 +148,18 @@
     if (!response.ok) {
       const error = (data && data.error) || {};
 
+      /* The server dropped the session (idle timeout or logout in
+         another tab). Send protected pages back to the login form. */
+      if (response.status === 401 && error.code === 'UNAUTHORIZED') {
+        clearSession();
+        invalidateCsrf();
+        const path = global.location.pathname;
+        const onLoginPage = path === '/' || path.endsWith('/index.html');
+        if (!onLoginPage) {
+          global.location.replace('index.html?login=1&expired=1');
+        }
+      }
+
       /* A stale CSRF token usually means the session cookie expired.
          Fetch a fresh token and retry the request once. */
       if (response.status === 400 && error.code === 'CSRF_ERROR' && canRetry) {

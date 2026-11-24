@@ -53,7 +53,9 @@ from security import (
     security_answer_error,
     security_question_text,
     session_expired,
+    session_should_touch,
     start_user_session,
+    touch_user_session,
     verify_password,
     verify_recaptcha,
 )
@@ -71,7 +73,10 @@ OTP_EXPIRY_MINUTES = 5          # verification code lifetime
 OTP_MAX_ATTEMPTS = 5            # wrong code tries before it is burned
 OTP_RESEND_SECONDS = 60         # minimum wait between code requests
 RESET_TOKEN_EXPIRY_MINUTES = 30 # password-reset link lifetime
-SESSION_TIMEOUT_MINUTES = 30    # normal login lifetime
+# Idle lifetime for a normal login. The timer restarts on real user
+# activity and expires when the tab is left alone. Use 900 for the
+# required 15-minute idle timeout.
+SESSION_IDLE_TIMEOUT_SECONDS = 10
 REMEMBER_TIMEOUT_DAYS = 7       # "Keep me signed in" lifetime
 
 # Rate limits: (number of attempts, window in seconds)
@@ -266,8 +271,14 @@ def add_security_headers(response):
 @app.before_request
 def check_session_and_csrf():
     """Expire old sessions, then require a CSRF token on writes."""
-    if session.get("user_id") and session_expired():
-        clear_user_session()
+    user_id = session.get("user_id")
+    if user_id:
+        if session_expired():
+            clear_user_session()
+        elif session_should_touch():
+            # Sliding idle timeout: real requests restart the clock.
+            # Background pollers do not, so an untouched tab expires.
+            touch_user_session()
 
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         if not csrf_token_is_valid():
@@ -391,8 +402,16 @@ def send_verification_code(user):
         "otp_sent",
         user_id=user["id"],
         email_tried=user["email"],
-        details="email verification code",
+        details=f"email verification code; delivered={bool(sent)}",
     )
+    if not sent:
+        # SMTP failed or was skipped. The code is in outbox.log and
+        # the Flask terminal so the demo can still continue.
+        log_event(
+            "otp_delivery_failed",
+            user_id=user["id"],
+            email_tried=user["email"],
+        )
     return bool(sent)
 
 
@@ -540,12 +559,12 @@ def update_last_login(user):
 
 
 def start_session_for(user, remember=False):
-    timeout = (
-        REMEMBER_TIMEOUT_DAYS * 24 * 60
+    timeout_seconds = (
+        REMEMBER_TIMEOUT_DAYS * 24 * 60 * 60
         if remember
-        else SESSION_TIMEOUT_MINUTES
+        else SESSION_IDLE_TIMEOUT_SECONDS
     )
-    start_user_session(user, timeout, remember=remember)
+    start_user_session(user, timeout_seconds, remember=remember)
 
 
 # ============================================================

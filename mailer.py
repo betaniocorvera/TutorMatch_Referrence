@@ -20,11 +20,19 @@ import smtplib
 import ssl
 from datetime import datetime
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
+from html import escape
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from flask import current_app
 from flask_mail import Mail
+
+# Load .env here too. mailer must not depend on another module
+# importing dotenv first, or MAIL_DEV_MODE silently stays at its
+# default (true) and real email is never attempted.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 mail = Mail()
 
@@ -89,8 +97,8 @@ def _smtp_settings():
     }
 
 
-def _send_via_smtp(subject, recipient, body):
-    """Send one plain-text message through Gmail SMTP."""
+def _send_via_smtp(subject, recipient, body, html_body=None):
+    """Send one message through Gmail SMTP."""
     settings = _smtp_settings()
 
     if not settings["username"]:
@@ -106,7 +114,13 @@ def _send_via_smtp(subject, recipient, body):
     message["Subject"] = subject
     message["From"] = formataddr((settings["sender_name"], settings["username"]))
     message["To"] = recipient
+    # A Date and Message-ID header make the message look like a normal
+    # mail client sent it, which lowers the chance of a spam filter hit.
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid()
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
 
     if settings["use_ssl"]:
         context = ssl.create_default_context()
@@ -129,9 +143,9 @@ def _send_via_smtp(subject, recipient, body):
         smtp.send_message(message)
 
 
-def send_email(subject, recipient, body):
+def send_email(subject, recipient, body, html_body=None):
     """
-    Send one plain-text email.
+    Send one email.
     Returns True on success, False on failure. A mail failure must
     never crash login or registration.
 
@@ -148,7 +162,7 @@ def send_email(subject, recipient, body):
         return True
 
     try:
-        _send_via_smtp(subject, recipient, body)
+        _send_via_smtp(subject, recipient, body, html_body)
         return True
     except Exception as exc:
         # Do not leak SMTP details to the browser, but make the
@@ -178,7 +192,22 @@ def send_otp_email(recipient, name, otp, expires_minutes):
         f"This code is valid for {expires_minutes} minutes and can be used once.\n"
         f"If you did not create a TutorMatch account, you can ignore this email.\n"
     )
-    return send_email(subject, recipient, body)
+    html_body = f"""\
+<html>
+  <body style="margin:0;background:#f6f1e7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#2f2a24;">
+    <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e8dfd0;border-radius:16px;padding:32px;">
+      <p style="margin:0 0 8px;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#c96b1f;">TutorMatch</p>
+      <h1 style="margin:0 0 16px;font-size:22px;">Verify your email</h1>
+      <p style="margin:0 0 8px;">Hi {escape(name)},</p>
+      <p style="margin:0 0 20px;">Use this code to finish creating your account:</p>
+      <p style="margin:0 0 20px;padding:16px;border-radius:12px;background:#fdf3e6;text-align:center;font-size:32px;font-weight:bold;letter-spacing:8px;color:#2f2a24;">{escape(otp)}</p>
+      <p style="margin:0 0 8px;">This code is valid for {expires_minutes} minutes and can be used once.</p>
+      <p style="margin:0;color:#6b6258;font-size:13px;">If you did not create a TutorMatch account, you can ignore this email.</p>
+    </div>
+  </body>
+</html>
+"""
+    return send_email(subject, recipient, body, html_body)
 
 
 def send_reset_email(recipient, name, reset_url, expires_minutes):
@@ -191,7 +220,25 @@ def send_reset_email(recipient, name, reset_url, expires_minutes):
         f"The link expires in {expires_minutes} minutes and can be used once.\n"
         f"If you did not request this, ignore this email. Your password is unchanged.\n"
     )
-    return send_email(subject, recipient, body)
+    html_body = f"""\
+<html>
+  <body style="margin:0;background:#f6f1e7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#2f2a24;">
+    <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e8dfd0;border-radius:16px;padding:32px;">
+      <p style="margin:0 0 8px;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#c96b1f;">TutorMatch</p>
+      <h1 style="margin:0 0 16px;font-size:22px;">Reset your password</h1>
+      <p style="margin:0 0 8px;">Hi {escape(name)},</p>
+      <p style="margin:0 0 20px;">Click the button below to choose a new password.</p>
+      <p style="margin:0 0 20px;">
+        <a href="{escape(reset_url, quote=True)}"
+           style="display:inline-block;background:#c96b1f;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:bold;">Choose a new password</a>
+      </p>
+      <p style="margin:0 0 8px;font-size:13px;color:#6b6258;word-break:break-all;">Or paste this link: {escape(reset_url)}</p>
+      <p style="margin:0;color:#6b6258;font-size:13px;">The link expires in {expires_minutes} minutes and can be used once. If you did not request this, ignore this email. Your password is unchanged.</p>
+    </div>
+  </body>
+</html>
+"""
+    return send_email(subject, recipient, body, html_body)
 
 
 def send_security_alert(recipient, name, event_label, ip_address, user_agent, when):
