@@ -114,19 +114,19 @@
               </div>
 
               <div class="field-grid">
-                <div class="field-block">
+                <div class="field-block" data-signup-filled>
                   <label class="field-label" for="ob-name">Display name</label>
                   <input id="ob-name" class="ob-field" type="text" maxlength="80" autocomplete="name" placeholder="Your name" />
                   <p class="ob-error" data-error-for="name"></p>
                 </div>
 
-                <div class="field-block">
+                <div class="field-block" data-signup-filled>
                   <label class="field-label" for="ob-headline">Headline <span class="optional">optional</span></label>
                   <input id="ob-headline" class="ob-field" type="text" maxlength="120" placeholder="e.g. Math &amp; Calculus tutor" />
                   <p class="ob-error" data-error-for="headline"></p>
                 </div>
 
-                <div class="field-block field-block-wide">
+                <div class="field-block field-block-wide" data-signup-filled>
                   <label class="field-label" for="ob-bio">Short bio</label>
                   <textarea id="ob-bio" class="ob-field ob-textarea" rows="5" maxlength="600" placeholder="What do you teach or what are you working on?"></textarea>
                   <div class="field-meta">
@@ -136,7 +136,7 @@
                   <p class="ob-error" data-error-for="bio"></p>
                 </div>
 
-                <div class="field-block">
+                <div class="field-block" data-signup-filled>
                   <label class="field-label" for="ob-birthdate">Birthdate <span class="optional">private</span></label>
                   <input id="ob-birthdate" class="ob-field" type="date" />
                   <p class="ob-error" data-error-for="birthdate"></p>
@@ -277,9 +277,81 @@
                 </div>
               </div>
 
+              <div class="tag-section">
+                <h3>Personal details</h3>
+                <p class="muted-note">These can be changed here. Phone and full address stay private unless you allow accepted matches to see them.</p>
+                <div class="field-grid">
+                  <div class="field-block">
+                    <label class="field-label" for="ob-gender">Gender</label>
+                    <select id="ob-gender" class="ob-field">
+                      <option value="">Prefer not to say</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                    <p class="ob-error" data-error-for="gender"></p>
+                  </div>
+                  <div class="field-block">
+                    <label class="field-label" for="ob-phone">Phone number</label>
+                    <input id="ob-phone" class="ob-field" type="tel" maxlength="20" placeholder="0917 123 4567" />
+                    <p class="ob-error" data-error-for="phone"></p>
+                  </div>
+                  <div class="field-block field-block-wide">
+                    <label class="field-label" for="ob-address-line">House / street / purok</label>
+                    <input id="ob-address-line" class="ob-field" type="text" maxlength="160" placeholder="Purok 2, Poblacion" />
+                    <p class="ob-error" data-error-for="addressLine"></p>
+                  </div>
+                  <div class="field-block">
+                    <label class="field-label" for="ob-province">Province</label>
+                    <input id="ob-province" class="ob-field" type="text" maxlength="80" placeholder="Agusan del Norte" />
+                    <p class="ob-error" data-error-for="province"></p>
+                  </div>
+                  <div class="field-block">
+                    <label class="field-label" for="ob-postal-code">ZIP code</label>
+                    <input id="ob-postal-code" class="ob-field" type="text" inputmode="numeric" maxlength="10" placeholder="8600" />
+                    <p class="ob-error" data-error-for="postalCode"></p>
+                  </div>
+                  <div class="field-block">
+                    <label class="field-label" for="ob-school">School / university</label>
+                    <input id="ob-school" class="ob-field" type="text" maxlength="120" placeholder="CSU Cabadbaran" />
+                    <p class="ob-error" data-error-for="school"></p>
+                  </div>
+                  <div class="field-block" data-role-field="student">
+                    <label class="field-label" for="ob-grade-level">Grade / year level</label>
+                    <input id="ob-grade-level" class="ob-field" type="text" maxlength="40" placeholder="Grade 11" />
+                    <p class="ob-error" data-error-for="gradeLevel"></p>
+                  </div>
+                  <div class="field-block">
+                    <label class="field-label" for="ob-course">Course / strand</label>
+                    <input id="ob-course" class="ob-field" type="text" maxlength="120" placeholder="STEM" />
+                    <p class="ob-error" data-error-for="course"></p>
+                  </div>
+                  <div class="field-block" data-role-field="tutor">
+                    <label class="field-label" for="ob-education">Highest education</label>
+                    <input id="ob-education" class="ob-field" type="text" maxlength="80" placeholder="College graduate" />
+                    <p class="ob-error" data-error-for="education"></p>
+                  </div>
+                  <div class="field-block" data-role-field="tutor">
+                    <label class="field-label" for="ob-experience-years">Years of experience</label>
+                    <input id="ob-experience-years" class="ob-field" type="number" min="0" max="60" placeholder="3" />
+                    <p class="ob-error" data-error-for="experienceYears"></p>
+                  </div>
+                </div>
+
+                <label class="inline-check">
+                  <input id="ob-show-phone" type="checkbox" class="check" />
+                  <span>Show my phone to accepted matches</span>
+                </label>
+                <label class="inline-check">
+                  <input id="ob-show-address" type="checkbox" class="check" />
+                  <span>Show my full address to accepted matches</span>
+                </label>
+              </div>
+
               <p class="privacy-note">
                 <i data-lucide="shield-check" aria-hidden="true"></i>
-                Your email, birthdate, and exact address stay private. Search results only show your barangay and city.
+                Your email, birthdate, phone, and exact address stay private. Search results only show your barangay and city.
               </p>
             </section>
 

@@ -102,6 +102,14 @@
     return min && max ? min + '–' + max + ' budget' : 'Budget not set';
   }
 
+  function genderLabel(value) {
+    if (value === 'male') return 'Male';
+    if (value === 'female') return 'Female';
+    if (value === 'other') return 'Other';
+    if (value === 'prefer_not_to_say') return 'Prefer not to say';
+    return '';
+  }
+
   function formatDistance(meters) {
     if (meters === null || meters === undefined || meters === '') {
       return 'Distance unavailable';
@@ -749,6 +757,46 @@
     const area = person.area || {};
     const areaText = [area.barangay, area.city].filter(Boolean).join(', ') || 'Not set';
 
+    const background = [
+      ['Gender', genderLabel(person.gender)],
+      ['School', person.school],
+      ['Grade / year level', person.gradeLevel],
+      ['Course / strand', person.course],
+      ['Education', person.education],
+      ['Experience', person.experienceYears !== null && person.experienceYears !== undefined
+        ? person.experienceYears + (Number(person.experienceYears) === 1 ? ' year' : ' years')
+        : '']
+    ].filter((item) => item[1]);
+    const backgroundMarkup = background.length
+      ? '<div class="profile-section"><h4>Background</h4><div class="profile-meta-grid">' +
+        background.map((item) =>
+          '<div class="meta-box"><span>' + escapeHtml(item[0]) + '</span><strong>' +
+            escapeHtml(item[1]) + '</strong></div>'
+        ).join('') +
+        '</div></div>'
+      : '';
+
+    const address = person.address || {};
+    const fullAddress = [
+      address.line,
+      address.barangay,
+      address.city,
+      address.province,
+      address.postalCode
+    ].filter(Boolean).join(', ');
+    const contact = [
+      ['Phone', person.phone],
+      ['Full address', fullAddress]
+    ].filter((item) => item[1]);
+    const contactMarkup = contact.length
+      ? '<div class="profile-section"><h4>Contact</h4><div class="profile-meta-grid">' +
+        contact.map((item) =>
+          '<div class="meta-box"><span>' + escapeHtml(item[0]) + '</span><strong>' +
+            escapeHtml(item[1]) + '</strong></div>'
+        ).join('') +
+        '</div><p class="muted-note">Shared only with accepted matches.</p></div>'
+      : '';
+
     return '<div class="profile-hero">' +
         renderAvatar(person, 'profile-avatar') +
         '<div>' +
@@ -770,6 +818,8 @@
         '<h4>About</h4>' +
         '<p class="profile-bio">' + escapeHtml(person.bio || 'No bio added yet.') + '</p>' +
       '</div>' +
+      backgroundMarkup +
+      contactMarkup +
       '<div class="profile-section">' +
         '<h4>Subjects</h4>' +
         '<div class="profile-subjects">' +
@@ -814,7 +864,7 @@
           (sent ? ' disabled' : '') + '>' +
           (sent ? 'Request sent' : 'Send Request') + '</button>' +
       '</div>' +
-      '<p class="profile-note">Location is shown at barangay level only. Exact addresses are never public.</p>';
+      '<p class="profile-note">Location is shown at barangay level in search. Phone and full address are only shared with accepted matches.</p>';
   }
 
   global.TutorMatchSearch = {

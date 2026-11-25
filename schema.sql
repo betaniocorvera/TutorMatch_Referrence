@@ -23,7 +23,12 @@ USE tutormatch;
 CREATE TABLE IF NOT EXISTS users (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   role               ENUM('student', 'tutor', 'admin') NOT NULL DEFAULT 'student',
+  -- name stays the composed display name so chat, search and
+  -- notifications keep working. The parts are stored separately.
   name               VARCHAR(80)  NOT NULL,
+  first_name         VARCHAR(50)  NULL,
+  middle_name        VARCHAR(50)  NULL,
+  last_name          VARCHAR(50)  NULL,
   email              VARCHAR(254) NOT NULL,
   password_hash      VARCHAR(255) NOT NULL,
 
@@ -163,6 +168,18 @@ CREATE TABLE IF NOT EXISTS profiles (
   photo_url             VARCHAR(255) NULL,
   bio                   VARCHAR(600) NULL,
   birthdate             DATE NULL,
+  gender                ENUM('male', 'female', 'other', 'prefer_not_to_say') NULL,
+  phone                 VARCHAR(20) NULL,
+  address_line          VARCHAR(160) NULL,
+  province              VARCHAR(80) NULL,
+  postal_code           VARCHAR(10) NULL,
+  school                VARCHAR(120) NULL,
+  grade_level           VARCHAR(40) NULL,
+  course                VARCHAR(120) NULL,
+  education             VARCHAR(80) NULL,
+  experience_years      TINYINT UNSIGNED NULL,
+  show_phone            TINYINT(1) NOT NULL DEFAULT 0,
+  show_address          TINYINT(1) NOT NULL DEFAULT 0,
   headline              VARCHAR(120) NULL,
   status                ENUM('active', 'away', 'accepting', 'not_accepting')
                           NOT NULL DEFAULT 'active',

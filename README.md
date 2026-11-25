@@ -74,16 +74,18 @@ The seeder creates 4 tutor and 4 student profiles from `mock/seed.json`. Demo ac
 
 ## Auth flow
 
-- **Register** — creates an unverified account, emails a 6-digit code, and opens the verification form.
-- **Verify email** — the code expires in 5 minutes, allows 5 attempts, and is stored as an HMAC-SHA256 hash.
-- **Login** — requires a verified email. Wrong passwords lock the account after 5 attempts for 15 minutes.
+- **Sign up** — `signup.html` collects the full account in 3 steps plus OTP: (1) Account (role, first/middle/last name, email, password, terms), (2) About you (birthdate, gender, phone, address, barangay/city/province/ZIP, headline, bio, school/grade/course or education/experience, availability, privacy toggles), and (3) Recovery (3 different security questions). The account, profile, availability, and hashed answers are saved in one transaction, then a 6-digit code is emailed.
+- **Verify email** — the code expires in 5 minutes, allows 5 attempts, and is stored as an HMAC-SHA256 hash. Verification starts the session and sends new users to onboarding for profile customization only.
+- **Login** — requires a verified email and a Google reCAPTCHA v2 check. Wrong passwords use the lockout tiers below.
 - **Resend code** — rate-limited and returns the same generic response whether the account exists or not.
-- **Forgot password** — emails a single-use reset link. The link opens `/?reset_token=...` and the reset form in the auth modal.
+- **Forgot password** — emails a single-use reset link. The link opens `/?reset_token=...`, asks the saved security questions, then shows the reset form.
 - **Reset password** — updates the password hash, invalidates old sessions, and clears lockout state.
 - **Logout** — clears the server session.
 - **Sessions** — Flask session cookie is the source of truth. The dashboard calls `/api/auth/me` before initializing. A normal login uses a sliding idle timeout (`SESSION_IDLE_TIMEOUT_SECONDS` in `app.py`); background notification/message polls do not keep an idle tab alive. "Keep me signed in" uses a fixed 7-day lifetime.
 - **CSRF** — every write sends `X-CSRFToken`; the client fetches it from `/api/csrf` and retries once if the session token expired.
 - **Lockout tiers** — 3 wrong passwords locks for 15 seconds; 3 more for 30 seconds; 3 more for 60 seconds; 3 more for a full 15-minute lock. When the 15-minute lock expires the counter restarts at tier 1. Attempts made during a lock are rejected without counting, and a successful login clears the counter.
+- **Name rules** — first, middle (optional), and last names are 1–50 characters each and accept letters plus spaces, hyphens, apostrophes, and periods only. Digits are rejected. `users.name` is the composed display name used in search, chat, and notifications.
+- **Password rule** — at least 8 characters with at least one letter and one number.
 - **Security log** — registrations, logins, lockouts, OTP events, resets, and rate-limit hits are appended to `security_events`.
 
 In development, read the latest OTP or reset link from the Flask terminal or `outbox.log`. The API never returns OTPs or reset tokens.
@@ -92,15 +94,18 @@ In development, read the latest OTP or reset link from the Flask terminal or `ou
 
 After login or email verification, the API returns `onboardingRequired`. The landing page sends new or incomplete profiles to `/onboarding`; completed profiles go to the dashboard.
 
-The wizard has seven steps:
+The wizard has eight steps:
 
 1. Basics — photo (optional), display name, headline, bio, birthdate (private), status.
 2. Subjects and levels — at least one subject, each with a level.
 3. Goals and style — recommended, not required.
 4. Availability — at least one weekly slot from the morning, afternoon, or evening grid.
 5. Rate or budget and format — required.
-6. Area — barangay and city only; no exact address.
+6. Area and personal details — barangay, city, gender, phone, address, school/course or education/experience, plus the phone/address privacy toggles.
 7. Preview — review the public card, then finish.
+8. Account recovery — the 3 security questions.
+
+Because the full sign-up already collected availability, area/personal details, and recovery questions, **new accounts skip steps 4, 6, and 8**. Their wizard only asks for photo, subjects, goals/style, rate or budget, format, and the final preview. Skipped steps are hidden from the step rail and progress counter. Edit mode (`/onboarding?edit=1`) keeps every step so all details stay editable.
 
 Profiles save to MySQL after each step and on text changes (debounced). `Save & exit` stores your progress; the next visit resumes at the furthest saved step. Required fields cannot be skipped, and the completeness meter updates live.
 
@@ -154,27 +159,31 @@ If an explicit distance filter is too narrow, the server retries without it and 
 
 Distance comes from barangay centroids and Haversine, rounded to the nearest 100 m. Unknown barangays return `distanceMeters: null` with a warning; missing distance is never treated as zero. Location is always barangay-level only.
 
-Search results and public profiles never expose email, birthdate, exact coordinates, password hashes, verification documents, reports, or blocks.
+Search results never expose email, birthdate, phone, full address, exact coordinates, password hashes, security answers, verification documents, reports, or blocks. `GET /api/profiles/<id>` adds phone and full address only for the owner, or for an accepted match when the owner enabled `showPhone` / `showAddress`. Public profiles include gender, school, grade/year level, course, education, experience, barangay, and city.
 
 ## Files
-- `index.html` - landing page, auth modal (login, register, verify, reset)
+- `index.html` - landing page and auth modal (login, verify, reset)
+- `signup.html` - dedicated 3-step sign-up page plus OTP verification
+- `signup.css` - sign-up page styling
 - `styles.css` - animations and form styling
 - `script.js` - landing interactions and API-backed auth flows
 - `dashboard.html` - authenticated search dashboard shell
 - `dashboard.css` - dashboard and responsive styles
 - `onboarding.html` - eight-step profile wizard (includes account recovery questions)
 - `onboarding.css` - onboarding-specific styles
-- `js/onboarding.js` - wizard state, autosave, validation, preview
+- `js/onboarding.js` - wizard state, autosave, skipped steps, validation, preview
+- `js/signup.js` - sign-up steps, role fields, availability grid, security questions, OTP
 - `js/auth.js` - shared API client, CSRF handling, session validation, profile methods
 - `js/dashboard.js` - async session guard, sidebar, hash routing, logout
 - `js/data.js` - shared UI constants for availability and labels only
 - `js/search.js` - API-backed search, filters, sorting, pagination, profile panel, requests
 - `js/profile.js`, `js/messages.js` - dashboard sections
 - `app.py` - Flask app, auth/onboarding/profile/search routes, static routes, security headers
-- `security.py` - validation, hashing, OTP/reset helpers, CSRF, sessions, rate limits
+- `security.py` - validation, name handling, hashing, OTP/reset helpers, CSRF, sessions, rate limits
 - `db.py` - MySQL helpers
 - `mailer.py` - dev outbox / SMTP email helpers
 - `schema.sql` - MySQL schema and reference subjects
+- `migrations/001_signup_fields.sql` - upgrade existing databases with the sign-up columns
 - `seed_demo.py` - fictional demo account/profile seeder
 - `uploads/avatars/` - optional profile photos (local, git-ignored)
 - `docs/` - product, API, and data documentation for Phases 1–2
@@ -188,6 +197,6 @@ Search results and public profiles never expose email, birthdate, exact coordina
 - [Demo seed data](mock/seed.json)
 
 ## Status
-The landing page, registration/login/verification/reset flow, secure sessions, onboarding/profile persistence, authenticated dashboard, and API-backed search matching are wired. Students and tutors can search each other, filter, sort, paginate, preview privacy-safe public profiles, and send local requests.
+The landing page, full sign-up with personal details and recovery questions, login/verification/reset flow, secure sessions, onboarding/profile persistence, authenticated dashboard, and API-backed search matching are wired. Students and tutors can search each other, filter, sort, paginate, preview privacy-safe public profiles, and send local requests.
 
 Sent requests and messages are still stored in the browser. A persistent requests/messages backend and the evaluation baseline comparisons remain next.

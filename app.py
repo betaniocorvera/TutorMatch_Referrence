@@ -31,8 +31,10 @@ from security import (
     SECURITY_QUESTION_COUNT,
     SECURITY_QUESTIONS,
     clean_name,
+    clean_name_part,
     clean_role,
     clear_user_session,
+    compose_name,
     csrf_token_is_valid,
     generate_otp,
     generate_reset_token,
@@ -104,6 +106,7 @@ REGISTER_RATE_WINDOW_SECONDS = 3600
 PROFILE_LEVELS = ("elementary", "high_school", "senior_high", "college", "adult")
 PROFILE_FORMATS = ("online", "in_person", "both")
 PROFILE_STATUSES = ("active", "away", "accepting", "not_accepting")
+GENDERS = ("male", "female", "other", "prefer_not_to_say")
 STYLE_TAGS = (
     "visual",
     "step_by_step",
@@ -337,6 +340,9 @@ def public_user(user, profile_state=None):
         "id": user["id"],
         "role": user["role"],
         "name": user["name"],
+        "firstName": user.get("first_name"),
+        "middleName": user.get("middle_name"),
+        "lastName": user.get("last_name"),
         "email": user["email"],
         "emailVerified": user.get("email_verified_at") is not None,
     }
@@ -350,7 +356,8 @@ def public_user(user, profile_state=None):
 def fetch_user_by_email(email):
     return db.query_one(
         """
-        SELECT id, role, name, email, password_hash, email_verified_at,
+        SELECT id, role, name, first_name, middle_name, last_name, email,
+               password_hash, email_verified_at,
                failed_attempts, locked_until, session_version, status,
                last_login_at, last_login_ip
         FROM users
@@ -363,7 +370,8 @@ def fetch_user_by_email(email):
 def fetch_user_by_id(user_id):
     return db.query_one(
         """
-        SELECT id, role, name, email, password_hash, email_verified_at,
+        SELECT id, role, name, first_name, middle_name, last_name, email,
+               password_hash, email_verified_at,
                failed_attempts, locked_until, session_version, status,
                last_login_at, last_login_ip
         FROM users
@@ -666,6 +674,18 @@ def profile_row_to_dict(row, user):
         "photo_url": row["photo_url"] if row else None,
         "bio": row["bio"] if row else None,
         "birthdate": row["birthdate"] if row else None,
+        "gender": row["gender"] if row else None,
+        "phone": row["phone"] if row else None,
+        "address_line": row["address_line"] if row else None,
+        "province": row["province"] if row else None,
+        "postal_code": row["postal_code"] if row else None,
+        "school": row["school"] if row else None,
+        "grade_level": row["grade_level"] if row else None,
+        "course": row["course"] if row else None,
+        "education": row["education"] if row else None,
+        "experience_years": row["experience_years"] if row else None,
+        "show_phone": bool(row["show_phone"]) if row else False,
+        "show_address": bool(row["show_address"]) if row else False,
         "headline": row["headline"] if row else None,
         "status": row["status"] if row else "active",
         "format": row["format"] if row else None,
@@ -852,10 +872,25 @@ def get_profile_payload(user_id):
         "userId": user["id"],
         "role": user["role"],
         "name": user["name"],
+        "firstName": user.get("first_name"),
+        "middleName": user.get("middle_name"),
+        "lastName": user.get("last_name"),
         "email": user["email"],
         "photoUrl": profile["photo_url"],
         "bio": profile["bio"],
         "birthdate": _date_text(profile["birthdate"]),
+        "gender": profile["gender"],
+        "phone": profile["phone"],
+        "addressLine": profile["address_line"],
+        "province": profile["province"],
+        "postalCode": profile["postal_code"],
+        "school": profile["school"],
+        "gradeLevel": profile["grade_level"],
+        "course": profile["course"],
+        "education": profile["education"],
+        "experienceYears": profile["experience_years"],
+        "showPhone": profile["show_phone"],
+        "showAddress": profile["show_address"],
         "headline": profile["headline"],
         "status": profile["status"],
         "format": profile["format"],
@@ -893,6 +928,7 @@ def get_profile_payload(user_id):
         "onboardingStep": profile["onboarding_step"],
         "onboardingCompleted": profile["onboarding_completed_at"] is not None,
         "verified": profile["verified_at"] is not None,
+        "securityQuestionsSet": has_security_questions(user["id"]),
         "createdAt": _datetime_text(profile["created_at"]),
         "updatedAt": _datetime_text(profile["updated_at"]),
     }
@@ -1380,6 +1416,8 @@ def _load_search_candidates(role):
     rows = db.query_all(
         """
         SELECT p.id, p.user_id, p.photo_url, p.bio, p.headline, p.status,
+               p.gender, p.school, p.grade_level, p.course, p.education,
+               p.experience_years, p.show_phone, p.show_address,
                p.format, p.area_barangay, p.area_city, p.coarse_geohash,
                p.rate_centavos, p.budget_min_centavos, p.budget_max_centavos,
                p.currency, p.style_tags, p.goal_tags, p.completeness,
@@ -1391,6 +1429,7 @@ def _load_search_candidates(role):
         JOIN users u ON u.id = p.user_id
         WHERE u.role = %s
           AND u.status = 'active'
+          AND u.email_verified_at IS NOT NULL
           AND p.onboarding_completed_at IS NOT NULL
         ORDER BY p.id
         """,
@@ -1839,7 +1878,27 @@ def _build_match(
     }
 
 
-def _public_profile(candidate, viewer, distance_meters):
+def _is_matched(user_a, user_b):
+    """True when the two users have an accepted match request."""
+    if not user_a or not user_b or int(user_a) == int(user_b):
+        return False
+    row = db.query_one(
+        """
+        SELECT id
+        FROM match_requests
+        WHERE status = 'accepted'
+          AND (
+            (from_user_id = %s AND to_user_id = %s)
+            OR (from_user_id = %s AND to_user_id = %s)
+          )
+        LIMIT 1
+        """,
+        (user_a, user_b, user_b, user_a),
+    )
+    return row is not None
+
+
+def _public_profile(candidate, viewer, distance_meters, include_private=False):
     """Serialize only fields allowed by the privacy matrix."""
     row = candidate["row"]
     user = candidate["user"]
@@ -1851,6 +1910,12 @@ def _public_profile(candidate, viewer, distance_meters):
         "photoUrl": row.get("photo_url"),
         "headline": row.get("headline"),
         "bio": row.get("bio"),
+        "gender": row.get("gender"),
+        "school": row.get("school"),
+        "gradeLevel": row.get("grade_level"),
+        "course": row.get("course"),
+        "education": row.get("education"),
+        "experienceYears": row.get("experience_years"),
         "status": row.get("status"),
         "format": row.get("format"),
         "area": {
@@ -1876,6 +1941,20 @@ def _public_profile(candidate, viewer, distance_meters):
         ),
         "reviews": {"count": 0, "average": None},
     }
+    if include_private:
+        viewer_id = (viewer or {}).get("userId")
+        is_owner = viewer_id is not None and int(viewer_id) == int(user["id"])
+        if is_owner or _is_matched(viewer_id, user["id"]):
+            if is_owner or row.get("show_phone"):
+                profile["phone"] = row.get("phone")
+            if is_owner or row.get("show_address"):
+                profile["address"] = {
+                    "line": row.get("address_line"),
+                    "barangay": row.get("area_barangay"),
+                    "city": row.get("area_city"),
+                    "province": row.get("province"),
+                    "postalCode": row.get("postal_code"),
+                }
     if user["role"] == "tutor":
         profile["rateCentavos"] = row.get("rate_centavos")
     else:
@@ -2282,6 +2361,18 @@ def index():
     return send_from_directory(str(BASE_DIR), "index.html")
 
 
+@app.get("/signup")
+@app.get("/signup.html")
+def signup_page():
+    """The full sign-up collects identity details and recovery questions."""
+    return send_from_directory(str(BASE_DIR), "signup.html")
+
+
+@app.get("/signup.css")
+def signup_styles():
+    return send_from_directory(str(BASE_DIR), "signup.css")
+
+
 @app.get("/styles.css")
 def styles():
     return send_from_directory(str(BASE_DIR), "styles.css")
@@ -2409,17 +2500,82 @@ def auth_me():
 # ============================================================
 # Authentication API
 # ============================================================
+def _text_value(value, max_length, field, fields, label, multiline=False):
+    """Trim optional text and enforce a column-friendly length."""
+    raw = str(value or "")
+    text = raw.strip() if multiline else re.sub(r"\s+", " ", raw.strip())
+    if not text:
+        return None
+    if len(text) > max_length:
+        fields[field] = f"Keep the {label} under {max_length} characters."
+        return None
+    return text
+
+
+def _parse_phone(value, fields):
+    """Accept digits with optional spaces, dashes, parentheses and +."""
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return None
+    digits = re.sub(r"\D", "", text)
+    if (
+        len(digits) < 7
+        or len(digits) > 15
+        or not re.fullmatch(r"\+?[0-9 ()\-]+", text)
+    ):
+        fields["phone"] = "Enter a valid phone number."
+        return None
+    return text
+
+
+def _parse_signup_questions(items, fields):
+    """Validate and hash the 3 recovery answers chosen at sign-up."""
+    if not isinstance(items, list) or len(items) != SECURITY_QUESTION_COUNT:
+        fields["securityQuestions"] = (
+            f"Choose {SECURITY_QUESTION_COUNT} different recovery questions."
+        )
+        return []
+
+    parsed = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            fields["securityQuestions"] = "Choose questions from the list."
+            return []
+        key = str(item.get("key") or "").strip()
+        if not security_question_text(key):
+            fields["securityQuestions"] = "Choose questions from the list."
+            return []
+        if key in seen:
+            fields["securityQuestions"] = "Choose 3 different questions."
+            return []
+        seen.add(key)
+
+        answer = normalize_security_answer(item.get("answer"))
+        problem = security_answer_error(answer)
+        if problem:
+            fields["securityQuestions"] = problem
+            return []
+        parsed.append({"key": key, "answer_hash": hash_password(answer)})
+    return parsed
+
+
 @app.post("/api/auth/register")
 def auth_register():
     """
-    Create an unverified account, then email a 6-digit code.
-    No session is started until the email is verified.
+    Create an unverified account with the full user information,
+    then email a 6-digit code. No session is started until the
+    email is verified.
     """
     data = json_body()
     email = normalize_email(data.get("email"))
-    name = clean_name(data.get("name"))
     role = clean_role(data.get("role"))
     password = str(data.get("password") or "")
+    confirm = str(
+        data.get("confirmPassword")
+        if data.get("confirmPassword") is not None
+        else data.get("confirm") or ""
+    )
 
     if is_rate_limited(
         "registration_attempt",
@@ -2437,15 +2593,153 @@ def auth_register():
     fields = {}
     if not role:
         fields["role"] = "Choose Student or Tutor."
-    if not name:
-        fields["name"] = "Enter your full name (2-80 characters)."
     if not email:
         fields["email"] = "Enter a valid email address."
+
+    # ----- Name parts (letters only, no digits) -----
+    raw_first = str(data.get("firstName") or "").strip()
+    raw_middle = str(data.get("middleName") or "").strip()
+    raw_last = str(data.get("lastName") or "").strip()
+    first_name = clean_name_part(raw_first)
+    middle_name = clean_name_part(raw_middle) if raw_middle else None
+    last_name = clean_name_part(raw_last)
+
+    if not raw_first:
+        fields["firstName"] = "Enter your first name."
+    elif not first_name:
+        fields["firstName"] = (
+            "Use letters only, up to 50 characters (no numbers)."
+        )
+    if raw_middle and not middle_name:
+        fields["middleName"] = (
+            "Use letters only, up to 50 characters (no numbers)."
+        )
+    if not raw_last:
+        fields["lastName"] = "Enter your last name."
+    elif not last_name:
+        fields["lastName"] = (
+            "Use letters only, up to 50 characters (no numbers)."
+        )
+
+    name = compose_name(first_name, middle_name, last_name)
+    if name and len(name) > 80:
+        fields["lastName"] = "Your full name is too long."
+
+    # ----- Password -----
     problem = password_error(password)
     if problem:
         fields["password"] = problem
+    elif confirm and confirm != password:
+        fields["confirmPassword"] = "Passwords don't match."
+
+    if not bool(data.get("terms")):
+        fields["terms"] = "Please accept the terms to continue."
+
+    # ----- Birthdate -----
+    birthdate = None
+    birth_raw = str(data.get("birthdate") or "").strip()
+    if not birth_raw:
+        fields["birthdate"] = "Enter your birthdate."
+    else:
+        try:
+            birthdate = date.fromisoformat(birth_raw)
+        except ValueError:
+            fields["birthdate"] = "Use a valid date."
+        else:
+            if birthdate > date.today():
+                fields["birthdate"] = "Birthdate cannot be in the future."
+
+    # ----- About you -----
+    bio = _text_value(
+        data.get("bio"), 600, "bio", fields, "bio", multiline=True
+    )
+    if not bio:
+        if "bio" not in fields:
+            fields["bio"] = "Write a short bio (at least 10 characters)."
+    elif len(bio) < 10:
+        fields["bio"] = "Write a short bio (at least 10 characters)."
+
+    headline = _text_value(
+        data.get("headline"), 120, "headline", fields, "headline"
+    )
+
+    barangay = _text_value(
+        data.get("barangay"), 80, "barangay", fields, "barangay"
+    )
+    if not barangay and "barangay" not in fields:
+        fields["barangay"] = "Enter your barangay."
+
+    city = _text_value(data.get("city"), 80, "city", fields, "city")
+    if not city and "city" not in fields:
+        fields["city"] = "Enter your city or municipality."
+
+    availability = parse_availability(data.get("availability"), fields)
+    if not availability and "availability" not in fields:
+        fields["availability"] = "Add at least one availability slot."
+
+    # ----- Optional personal information -----
+    gender = str(data.get("gender") or "").strip() or None
+    if gender and gender not in GENDERS:
+        fields["gender"] = "Choose a valid gender option."
+
+    phone = _parse_phone(data.get("phone"), fields)
+    address_line = _text_value(
+        data.get("addressLine"),
+        160,
+        "addressLine",
+        fields,
+        "address",
+    )
+    province = _text_value(
+        data.get("province"), 80, "province", fields, "province"
+    )
+
+    postal_code = re.sub(r"\s+", "", str(data.get("postalCode") or "").strip())
+    if postal_code and not re.fullmatch(r"\d{4,10}", postal_code):
+        fields["postalCode"] = "Use a 4-10 digit ZIP code."
+        postal_code = None
+
+    school = _text_value(
+        data.get("school"), 120, "school", fields, "school"
+    )
+    grade_level = _text_value(
+        data.get("gradeLevel"),
+        40,
+        "gradeLevel",
+        fields,
+        "grade or year level",
+    )
+    course = _text_value(
+        data.get("course"), 120, "course", fields, "course"
+    )
+    education = _text_value(
+        data.get("education"), 80, "education", fields, "education"
+    )
+
+    experience_years = None
+    experience_raw = data.get("experienceYears")
+    if experience_raw not in (None, ""):
+        try:
+            experience_years = int(experience_raw)
+        except (TypeError, ValueError):
+            fields["experienceYears"] = "Enter a whole number of years."
+        else:
+            if experience_years < 0 or experience_years > 60:
+                fields["experienceYears"] = "Enter between 0 and 60 years."
+
+    show_phone = bool(data.get("showPhone"))
+    show_address = bool(data.get("showAddress"))
+
+    # ----- Recovery questions -----
+    questions = _parse_signup_questions(
+        data.get("securityQuestions"), fields
+    )
+
     if fields:
-        return validation_error(fields)
+        return validation_error(
+            fields,
+            "Please check the highlighted fields.",
+        )
 
     existing = db.query_one(
         "SELECT id FROM users WHERE email = %s",
@@ -2459,15 +2753,115 @@ def auth_register():
             409,
         )
 
+    profile_for_completeness = {
+        "role": role,
+        "bio": bio,
+        "birthdate": birthdate,
+        "headline": headline,
+        "status": "active",
+        "format": None,
+        "area_barangay": barangay,
+        "area_city": city,
+        "rate_centavos": None,
+        "budget_min_centavos": None,
+        "budget_max_centavos": None,
+        "verified_at": None,
+    }
+    percent, _required, _missing = compute_completeness(
+        profile_for_completeness,
+        [],
+        availability,
+    )
+
     try:
-        user_id = db.execute(
-            """
-            INSERT INTO users
-                (role, name, email, password_hash, email_verified_at)
-            VALUES (%s, %s, %s, %s, NULL)
-            """,
-            (role, name, email, hash_password(password)),
-        )
+        with db.transaction() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO users
+                        (role, name, first_name, middle_name, last_name,
+                         email, password_hash, email_verified_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
+                    """,
+                    (
+                        role,
+                        name,
+                        first_name,
+                        middle_name,
+                        last_name,
+                        email,
+                        hash_password(password),
+                    ),
+                )
+                user_id = cursor.lastrowid
+
+                cursor.execute(
+                    """
+                    INSERT INTO profiles
+                        (user_id, bio, birthdate, gender, phone,
+                         address_line, area_barangay, area_city,
+                         province, postal_code, school, grade_level,
+                         course, education, experience_years,
+                         show_phone, show_address, headline,
+                         completeness, onboarding_step)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                    """,
+                    (
+                        user_id,
+                        bio,
+                        birthdate,
+                        gender,
+                        phone,
+                        address_line,
+                        barangay,
+                        city,
+                        province,
+                        postal_code,
+                        school,
+                        grade_level,
+                        course,
+                        education,
+                        experience_years,
+                        int(show_phone),
+                        int(show_address),
+                        headline,
+                        percent,
+                    ),
+                )
+                profile_id = cursor.lastrowid
+
+                for slot in availability:
+                    cursor.execute(
+                        """
+                        INSERT INTO availability_slots
+                            (profile_id, day_of_week, start_time,
+                             end_time, timezone)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            profile_id,
+                            DAY_INDEX[slot["day"]],
+                            slot["start"],
+                            slot["end"],
+                            "Asia/Manila",
+                        ),
+                    )
+
+                for slot_number, question in enumerate(questions, start=1):
+                    cursor.execute(
+                        """
+                        INSERT INTO user_security_questions
+                            (user_id, slot, question_key, answer_hash)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (
+                            user_id,
+                            slot_number,
+                            question["key"],
+                            question["answer_hash"],
+                        ),
+                    )
     except Exception as exc:
         # The unique index is the final guard against a duplicate race.
         if "Duplicate entry" in str(exc):
@@ -2480,7 +2874,12 @@ def auth_register():
 
     user = fetch_user_by_id(user_id)
     email_sent = send_verification_code(user)
-    log_event("registration", user_id=user_id, email_tried=email, details=role)
+    log_event(
+        "registration",
+        user_id=user_id,
+        email_tried=email,
+        details=f"{role}, full sign-up",
+    )
 
     message = (
         "Account created. Check your email for the 6-digit verification code."
@@ -3251,6 +3650,7 @@ def update_my_profile():
     profile = profile_row_to_dict(row, user)
     fields = {}
     name_update = None
+    name_parts_update = None
 
     if "name" in data:
         name = clean_name(data.get("name"))
@@ -3259,6 +3659,46 @@ def update_my_profile():
         else:
             profile["name"] = name
             name_update = name
+
+    part_keys = ("firstName", "middleName", "lastName")
+    if any(key in data for key in part_keys):
+        first_raw = str(
+            data.get("firstName", user.get("first_name") or "")
+        ).strip()
+        middle_raw = str(
+            data.get("middleName", user.get("middle_name") or "")
+        ).strip()
+        last_raw = str(
+            data.get("lastName", user.get("last_name") or "")
+        ).strip()
+        first = clean_name_part(first_raw)
+        middle = clean_name_part(middle_raw) if middle_raw else None
+        last = clean_name_part(last_raw)
+
+        if not first_raw:
+            fields["firstName"] = "Enter your first name."
+        elif not first:
+            fields["firstName"] = (
+                "Use letters only, up to 50 characters (no numbers)."
+            )
+        if middle_raw and not middle:
+            fields["middleName"] = (
+                "Use letters only, up to 50 characters (no numbers)."
+            )
+        if not last_raw:
+            fields["lastName"] = "Enter your last name."
+        elif not last:
+            fields["lastName"] = (
+                "Use letters only, up to 50 characters (no numbers)."
+            )
+
+        composed = compose_name(first, middle, last)
+        if composed and len(composed) > 80:
+            fields["lastName"] = "Your full name is too long."
+        if composed and not fields:
+            profile["name"] = composed
+            name_update = composed
+            name_parts_update = (first, middle, last)
 
     if "headline" in data:
         headline = str(data.get("headline") or "").strip()
@@ -3288,6 +3728,87 @@ def update_my_profile():
                     fields["birthdate"] = "Birthdate cannot be in the future."
                 else:
                     profile["birthdate"] = birthdate
+
+    if "gender" in data:
+        gender = str(data.get("gender") or "").strip() or None
+        if gender and gender not in GENDERS:
+            fields["gender"] = "Choose a valid gender option."
+        else:
+            profile["gender"] = gender
+
+    if "phone" in data:
+        profile["phone"] = _parse_phone(data.get("phone"), fields)
+
+    if "addressLine" in data:
+        profile["address_line"] = _text_value(
+            data.get("addressLine"),
+            160,
+            "addressLine",
+            fields,
+            "address",
+        )
+
+    if "province" in data:
+        profile["province"] = _text_value(
+            data.get("province"), 80, "province", fields, "province"
+        )
+
+    if "postalCode" in data:
+        postal_code = re.sub(
+            r"\s+", "", str(data.get("postalCode") or "").strip()
+        )
+        if postal_code and not re.fullmatch(r"\d{4,10}", postal_code):
+            fields["postalCode"] = "Use a 4-10 digit ZIP code."
+        else:
+            profile["postal_code"] = postal_code or None
+
+    if "school" in data:
+        profile["school"] = _text_value(
+            data.get("school"), 120, "school", fields, "school"
+        )
+
+    if "gradeLevel" in data:
+        profile["grade_level"] = _text_value(
+            data.get("gradeLevel"),
+            40,
+            "gradeLevel",
+            fields,
+            "grade or year level",
+        )
+
+    if "course" in data:
+        profile["course"] = _text_value(
+            data.get("course"), 120, "course", fields, "course"
+        )
+
+    if "education" in data:
+        profile["education"] = _text_value(
+            data.get("education"), 80, "education", fields, "education"
+        )
+
+    if "experienceYears" in data:
+        experience_raw = data.get("experienceYears")
+        if experience_raw in (None, ""):
+            profile["experience_years"] = None
+        else:
+            try:
+                experience_years = int(experience_raw)
+            except (TypeError, ValueError):
+                fields["experienceYears"] = (
+                    "Enter a whole number of years."
+                )
+            else:
+                if experience_years < 0 or experience_years > 60:
+                    fields["experienceYears"] = (
+                        "Enter between 0 and 60 years."
+                    )
+                else:
+                    profile["experience_years"] = experience_years
+
+    if "showPhone" in data:
+        profile["show_phone"] = bool(data.get("showPhone"))
+    if "showAddress" in data:
+        profile["show_address"] = bool(data.get("showAddress"))
 
     if "status" in data:
         status = str(data.get("status") or "").strip()
@@ -3435,6 +3956,18 @@ def update_my_profile():
     profile_values = (
         profile["bio"],
         profile["birthdate"],
+        profile["gender"],
+        profile["phone"],
+        profile["address_line"],
+        profile["province"],
+        profile["postal_code"],
+        profile["school"],
+        profile["grade_level"],
+        profile["course"],
+        profile["education"],
+        profile["experience_years"],
+        int(profile["show_phone"]),
+        int(profile["show_address"]),
         profile["headline"],
         profile["status"],
         profile["format"],
@@ -3458,7 +3991,11 @@ def update_my_profile():
                 cursor.execute(
                     """
                     UPDATE profiles
-                    SET bio=%s, birthdate=%s, headline=%s,
+                    SET bio=%s, birthdate=%s, gender=%s, phone=%s,
+                        address_line=%s, province=%s, postal_code=%s,
+                        school=%s, grade_level=%s, course=%s,
+                        education=%s, experience_years=%s,
+                        show_phone=%s, show_address=%s, headline=%s,
                         status=%s, format=%s, area_barangay=%s, area_city=%s,
                         rate_centavos=%s, budget_min_centavos=%s,
                         budget_max_centavos=%s, currency=%s, style_tags=%s,
@@ -3472,12 +4009,16 @@ def update_my_profile():
                 cursor.execute(
                     """
                     INSERT INTO profiles
-                        (bio, birthdate, headline, status, format,
-                         area_barangay, area_city, rate_centavos,
-                         budget_min_centavos, budget_max_centavos, currency,
-                         style_tags, goal_tags, completeness, onboarding_step,
+                        (bio, birthdate, gender, phone, address_line,
+                         province, postal_code, school, grade_level, course,
+                         education, experience_years, show_phone, show_address,
+                         headline, status, format, area_barangay, area_city,
+                         rate_centavos, budget_min_centavos,
+                         budget_max_centavos, currency, style_tags, goal_tags,
+                         completeness, onboarding_step,
                          onboarding_completed_at, user_id)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """,
                     profile_values + (user_id,),
                 )
@@ -3525,10 +4066,27 @@ def update_my_profile():
                     )
 
             if name_update:
-                cursor.execute(
-                    "UPDATE users SET name = %s WHERE id = %s",
-                    (name_update, user_id),
-                )
+                if name_parts_update:
+                    cursor.execute(
+                        """
+                        UPDATE users
+                        SET name = %s, first_name = %s,
+                            middle_name = %s, last_name = %s
+                        WHERE id = %s
+                        """,
+                        (
+                            name_update,
+                            name_parts_update[0],
+                            name_parts_update[1],
+                            name_parts_update[2],
+                            user_id,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE users SET name = %s WHERE id = %s",
+                        (name_update, user_id),
+                    )
 
     log_event(
         "profile_saved",
@@ -3630,6 +4188,9 @@ def public_profile(profile_id):
     row = db.query_one(
         """
         SELECT p.id, p.user_id, p.photo_url, p.bio, p.headline, p.status,
+               p.gender, p.school, p.grade_level, p.course, p.education,
+               p.experience_years, p.phone, p.address_line, p.province,
+               p.postal_code, p.show_phone, p.show_address,
                p.format, p.area_barangay, p.area_city, p.coarse_geohash,
                p.rate_centavos, p.budget_min_centavos, p.budget_max_centavos,
                p.currency, p.style_tags, p.goal_tags, p.completeness,
@@ -3705,7 +4266,9 @@ def public_profile(profile_id):
         user_id=session["user_id"],
     )
     return jsonify({
-        "profile": _public_profile(candidate, viewer, distance),
+        "profile": _public_profile(
+            candidate, viewer, distance, include_private=True
+        ),
     })
 
 

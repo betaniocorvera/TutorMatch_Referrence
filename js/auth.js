@@ -307,10 +307,10 @@
     return data;
   }
 
-  async function register({ name, email, password, role }) {
+  async function register(payload) {
     return apiFetch('/api/auth/register', {
       method: 'POST',
-      body: { name, email, password, role }
+      body: payload || {}
     });
   }
 

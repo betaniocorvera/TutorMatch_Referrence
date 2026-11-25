@@ -576,7 +576,7 @@
   $$('.field', authModal).forEach((input) => {
     input.addEventListener('input', () => setError(input.id, ''));
   });
-  $('#reg-terms').addEventListener('change', () => setError('reg-terms', ''));
+  $('#reg-terms')?.addEventListener('change', () => setError('reg-terms', ''));
   $$('input[name="role"]', regForm).forEach((input) => {
     input.addEventListener('change', () => setRole(input.value));
   });
@@ -596,11 +596,12 @@
     return Math.max(1, s);
   }
   function updateStrength(pw) {
+    if (!strengthBar || !strengthLabel) return;
     const lvl = scorePassword(pw);
     strengthBar.dataset.level = String(lvl);
     strengthLabel.textContent = LEVELS[lvl];
   }
-  $('#reg-password').addEventListener('input', (e) => updateStrength(e.target.value));
+  $('#reg-password')?.addEventListener('input', (e) => updateStrength(e.target.value));
 
   /* ==========================================================
      Auth logic — Flask API
@@ -725,46 +726,12 @@
     }
   });
 
-  /* ---------- Register submit ---------- */
-  regForm.addEventListener('submit', async (e) => {
+  /* ---------- Register CTA ----------
+     The full sign-up lives on signup.html so the landing modal
+     stays short. The submit handler is kept only as a guard. */
+  regForm?.addEventListener('submit', (e) => {
     e.preventDefault();
-    clearAllErrors();
-
-    const name = $('#reg-name').value.trim();
-    const email = $('#reg-email').value.trim();
-    const password = $('#reg-password').value;
-    const confirm = $('#reg-confirm').value;
-    const terms = $('#reg-terms').checked;
-    const role = $('input[name="role"]:checked', regForm)?.value || 'student';
-
-    let ok = true;
-    if (name.length < 2 || name.length > 80) {
-      ok = setError('reg-name', 'Enter your full name (2-80 characters).') && ok;
-    }
-    if (!isEmail(email)) ok = setError('reg-email', 'Enter a valid email address.') && ok;
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      ok = setError('reg-password', 'Use at least 8 characters with a letter and a number.') && ok;
-    }
-    if (confirm !== password || !confirm) ok = setError('reg-confirm', 'Passwords don\u2019t match.') && ok;
-    if (!terms) ok = setError('reg-terms', 'Please accept the terms to continue.') && ok;
-    if (!ok) { $('[aria-invalid="true"]', regForm)?.focus(); return; }
-
-    setBusy(regForm, true);
-    try {
-      const result = await auth.register({ name, email, password, role });
-      openVerify(
-        email,
-        result.message || 'Account created. Check your email for the 6-digit verification code.'
-      );
-    } catch (err) {
-      applyApiError(err, 'register-status', {
-        name: 'reg-name',
-        email: 'reg-email',
-        password: 'reg-password'
-      });
-    } finally {
-      setBusy(regForm, false);
-    }
+    window.location.href = 'signup.html';
   });
 
   /* ---------- Verify email submit ---------- */

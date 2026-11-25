@@ -54,16 +54,48 @@ This contract lets the UI be built against realistic data before the backend exi
 
 ### POST `/api/auth/register`
 
-Creates an account with a fixed role. Profile setup happens in onboarding.
+Creates an unverified account with the full identity, personal, availability,
+and recovery information in one transaction, then emails a 6-digit code.
+Profile customization (photo, subjects, rate/budget, activeness, tags,
+format) happens after email verification.
 
 Request:
 
 ```json
 {
   "role": "student",
-  "name": "Ana Mae Cabahug",
+  "firstName": "Ana",
+  "middleName": "Mae",
+  "lastName": "Cabahug",
   "email": "ana@example.test",
-  "password": "correct-horse-battery"
+  "password": "correct-horse-battery",
+  "confirmPassword": "correct-horse-battery",
+  "terms": true,
+  "birthdate": "2009-04-12",
+  "gender": "female",
+  "phone": "0917 123 4567",
+  "addressLine": "Purok 2, Poblacion",
+  "barangay": "Del Pilar",
+  "city": "Cabadbaran City",
+  "province": "Agusan del Norte",
+  "postalCode": "8600",
+  "headline": "Grade 11 STEM student",
+  "bio": "Grade 11 STEM student preparing for college entrance exams.",
+  "school": "CSU Cabadbaran",
+  "gradeLevel": "Grade 11",
+  "course": "STEM",
+  "experienceYears": null,
+  "showPhone": false,
+  "showAddress": false,
+  "availability": [
+    { "day": "tue", "start": "18:00", "end": "20:00" },
+    { "day": "sat", "start": "09:00", "end": "11:00" }
+  ],
+  "securityQuestions": [
+    { "key": "childhood_street", "answer": "Rizal Street" },
+    { "key": "mother_maiden", "answer": "Santos" },
+    { "key": "favorite_food", "answer": "Adobo" }
+  ]
 }
 ```
 
@@ -72,22 +104,73 @@ Response `201`:
 ```json
 {
   "user": {
-    "id": "usr_student_001",
+    "id": 12,
     "role": "student",
     "name": "Ana Mae Cabahug",
     "email": "ana@example.test",
     "emailVerified": false
   },
-  "token": "mock-token",
-  "onboardingRequired": true
+  "verificationRequired": true,
+  "emailSent": true,
+  "message": "Account created. Check your email for the 6-digit verification code."
 }
 ```
 
 Rules:
+
 - `role` cannot be changed after registration.
-- Email must be unique.
+- Email must be unique and verified before login or search visibility.
+- Required: `role`, `firstName`, `lastName`, `email`, `password`,
+  `confirmPassword`, `terms`, `birthdate`, `bio` (10–600 chars),
+  `barangay`, `city`, at least one availability slot, and exactly 3
+  different security questions with answers.
+- Optional: `middleName`, `gender`, `phone`, `addressLine`, `province`,
+  `postalCode`, `headline`, `school`, `gradeLevel`, `course`,
+  `education`, `experienceYears`, `showPhone`, `showAddress`.
+- Names are 1–50 characters each and accept letters plus spaces, hyphens,
+  apostrophes, and periods only. Digits are rejected.
+- `users.name` is composed as `First Middle Last` and remains the display
+  name used in search, chat, and notifications.
 - Password minimum: 8 characters, at least one letter and one number.
-- The future backend must hash passwords with bcrypt or argon2. Never store plaintext.
+- Passwords are hashed with bcrypt; security answers are normalized and
+  hashed separately. Never store plaintext.
+- `showPhone` and `showAddress` default to `false`; either reveals the
+  field only to the owner and accepted matches.
+- The transaction inserts `users`, `profiles`, `availability_slots`, and
+  `user_security_questions`. A partial failure rolls back everything.
+
+### POST `/api/auth/verify-email`
+
+Request:
+
+```json
+{ "email": "ana@example.test", "otp": "123456" }
+```
+
+Response `200`:
+
+```json
+{
+  "user": { "id": 12, "role": "student", "name": "Ana Mae Cabahug" },
+  "onboardingRequired": true
+}
+```
+
+Verifies the latest unexpired code, marks the email verified, and starts a
+session. Codes expire after 5 minutes, are single use, and are invalidated
+after too many wrong attempts. An already-verified email returns
+`409 ALREADY_VERIFIED`.
+
+### POST `/api/auth/resend-otp`
+
+Request:
+
+```json
+{ "email": "ana@example.test" }
+```
+
+Always returns a generic `202` message so the endpoint does not reveal
+whether an account exists or still needs verification.
 
 ### POST `/api/auth/login`
 
@@ -97,9 +180,13 @@ Request:
 {
   "email": "ana@example.test",
   "password": "correct-horse-battery",
-  "remember": true
+  "remember": true,
+  "captchaToken": "<google-recaptcha-v2-response>"
 }
 ```
+
+`captchaToken` is required and verified with Google reCAPTCHA v2 before any
+account lookup. A failed check returns `400 CAPTCHA_FAILED`.
 
 Response `200`:
 
@@ -115,6 +202,20 @@ Response `200`:
   "onboardingRequired": false
 }
 ```
+
+Lockout tiers, counted per account on consecutive wrong passwords:
+
+| Consecutive failures | Lock duration |
+|---|---|
+| 3 | 15 seconds |
+| 6 | 30 seconds |
+| 9 | 60 seconds |
+| 12 | 15 minutes |
+
+After the 15-minute lock expires the counter restarts at Tier 1. Attempts
+made during a lock return `423 LOCKED` and do not count toward the tier. A
+successful login or a password reset clears the counter and lock. Rejected
+locked attempts are logged as `login_locked`, not `login_failed`.
 
 ### POST `/api/auth/logout`
 
@@ -250,9 +351,24 @@ Returns the private, editable profile.
     "userId": "usr_student_001",
     "role": "student",
     "name": "Ana Mae Cabahug",
+    "firstName": "Ana",
+    "middleName": "Mae",
+    "lastName": "Cabahug",
     "photoUrl": null,
     "bio": "Grade 11 STEM student preparing for college entrance exams.",
     "birthdate": "2009-04-12",
+    "gender": "female",
+    "phone": "0917 123 4567",
+    "addressLine": "Purok 2, Poblacion",
+    "province": "Agusan del Norte",
+    "postalCode": "8600",
+    "showPhone": false,
+    "showAddress": false,
+    "school": "CSU Cabadbaran",
+    "gradeLevel": "Grade 11",
+    "course": "STEM",
+    "education": null,
+    "experienceYears": null,
     "headline": "Grade 11 STEM student",
     "status": "active",
     "format": "both",
@@ -284,13 +400,29 @@ Returns the private, editable profile.
 ### PATCH `/api/me/profile`
 
 Accepts any subset of profile fields. Returns the updated private profile.
+Personal details and privacy toggles can be changed here too.
 
 ```json
 {
+  "firstName": "Ana",
+  "middleName": "Mae",
+  "lastName": "Cabahug",
   "headline": "Grade 11 STEM student",
   "bio": "Preparing for college entrance exams.",
   "format": "both",
   "area": { "barangay": "Del Pilar", "city": "Cabadbaran City" },
+  "gender": "female",
+  "phone": "0917 123 4567",
+  "addressLine": "Purok 2, Poblacion",
+  "province": "Agusan del Norte",
+  "postalCode": "8600",
+  "school": "CSU Cabadbaran",
+  "gradeLevel": "Grade 11",
+  "course": "STEM",
+  "education": null,
+  "experienceYears": null,
+  "showPhone": false,
+  "showAddress": false,
   "subjects": [
     { "id": "sub_calculus", "level": "senior_high" }
   ],
@@ -327,7 +459,14 @@ Response `200`:
 
 ### GET `/api/profiles/:id`
 
-Returns the **public** profile. Private fields are omitted.
+Returns the **public** profile. Public fields include `gender`, `school`,
+`gradeLevel`, `course`, `education`, `experienceYears`, barangay, and city.
+Private fields are omitted.
+
+`phone` and `address` are included only when the viewer is the owner, or the
+viewer has an accepted match with the profile owner **and** the matching
+privacy toggle (`showPhone` / `showAddress`) is on. Searches never include
+either field, even for accepted matches.
 
 ```json
 {
@@ -340,6 +479,12 @@ Returns the **public** profile. Private fields are omitted.
     "headline": "Math & Calculus tutor",
     "bio": "Licensed math teacher with 6 years of tutoring experience.",
     "status": "accepting",
+    "gender": "female",
+    "school": "CSU Cabadbaran",
+    "gradeLevel": null,
+    "course": "BS Mathematics",
+    "education": "College graduate",
+    "experienceYears": 6,
     "format": "both",
     "area": { "barangay": "Del Pilar", "city": "Cabadbaran City" },
     "distanceMeters": 1800,
@@ -362,6 +507,22 @@ Returns the **public** profile. Private fields are omitted.
       "count": 0,
       "average": null
     }
+  }
+}
+```
+
+When the owner or an accepted match with the toggle on requests the profile,
+the response also contains:
+
+```json
+{
+  "phone": "0917 123 4567",
+  "address": {
+    "line": "Purok 2, Poblacion",
+    "barangay": "Del Pilar",
+    "city": "Cabadbaran City",
+    "province": "Agusan del Norte",
+    "postalCode": "8600"
   }
 }
 ```
@@ -1117,17 +1278,25 @@ Public profile responses must never include:
 - Email address
 - Birthdate
 - Exact coordinates
-- Password hash
+- Password hash or security-answer hashes
 - Verification documents
 - Reports or block list
 
-Location responses include barangay, city, and rounded distance only. Chat messages are returned only to the two participants. Reports and blocks are visible only to their owner and to server-side moderation code. Analytics payloads are sanitized before insert and never include emails, passwords, message bodies, or exact locations. Admin endpoints are authenticated and role-restricted.
+`phone` and the full address are private by default. They appear only for
+the owner, or for an accepted match when the owner enabled the matching
+toggle (`showPhone` / `showAddress`). Public search results never include
+phone or full address. Location responses include barangay, city, and
+rounded distance only. Chat messages are returned only to the two
+participants. Reports and blocks are visible only to their owner and to
+server-side moderation code. Analytics payloads are sanitized before insert
+and never include emails, passwords, message bodies, or exact locations.
+Admin endpoints are authenticated and role-restricted.
 
 ## 18. Mapping to the backend
 
 | Contract area | Implemented tables / services |
 |---|---|
-| Auth | `users`, Flask sessions |
+| Auth | `users`, `email_otps`, `password_resets`, `user_security_questions`, `security_events`, Flask sessions |
 | Profiles | `profiles`, `subjects`, `profile_subjects`, `availability_slots` |
 | Search | `profiles`, `profile_subjects`, `availability_slots`, weighted in-process ranker |
 | Requests | `match_requests`, `conversations` |

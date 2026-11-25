@@ -43,7 +43,10 @@ The tables below keep the original conceptual Postgres types (`uuid`, `timestamp
 |---|---|---|
 | `id` | uuid | Primary key |
 | `role` | enum | `student` or `tutor`; immutable after registration |
-| `name` | text | Display name |
+| `name` | text | Composed display name: `First Middle Last` |
+| `first_name` | varchar(50) | Nullable for legacy accounts; letters only |
+| `middle_name` | varchar(50) | Nullable; letters only |
+| `last_name` | varchar(50) | Nullable for legacy accounts; letters only |
 | `email` | citext | Unique, lowercase, private |
 | `password_hash` | text | bcrypt or argon2; never returned by the API |
 | `email_verified_at` | timestamptz | Null until verified |
@@ -60,6 +63,18 @@ The tables below keep the original conceptual Postgres types (`uuid`, `timestamp
 | `photo_url` | text | Nullable; default avatar in the UI |
 | `bio` | text | Short introduction |
 | `birthdate` | date | Private; used for age/safety rules only |
+| `gender` | enum | Public; `male`, `female`, `other`, `prefer_not_to_say` |
+| `phone` | varchar(20) | Private by default; visible to accepted matches only when `show_phone` |
+| `address_line` | varchar(160) | Private by default; visible to accepted matches only when `show_address` |
+| `province` | varchar(80) | Optional address component |
+| `postal_code` | varchar(10) | Optional address component |
+| `school` | varchar(120) | Public |
+| `grade_level` | varchar(40) | Public for students |
+| `course` | varchar(120) | Public |
+| `education` | varchar(80) | Public for tutors |
+| `experience_years` | tinyint | Public; nullable |
+| `show_phone` | boolean | Default 0; reveals phone to accepted matches |
+| `show_address` | boolean | Default 0; reveals full address to accepted matches |
 | `headline` | text | Short role summary |
 | `status` | enum | `active`, `away`, `accepting`, `not_accepting` |
 | `format` | enum | `online`, `in_person`, `both` |
@@ -78,6 +93,11 @@ The tables below keep the original conceptual Postgres types (`uuid`, `timestamp
 | `last_active_at` | timestamptz | Used for freshness, not ranking alone |
 | `created_at` | timestamptz | Default now |
 | `updated_at` | timestamptz | Default now |
+
+Recovery questions live in `user_security_questions` (`user_id`, `slot`,
+`question_key`, `answer_hash`, `updated_at`). Exactly 3 different questions
+are stored per account, and only the hashes are persisted. OTP and reset
+state live in `email_otps` and `password_resets`.
 
 ### 3.3 `subjects`
 

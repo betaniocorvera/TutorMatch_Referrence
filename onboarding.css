@@ -437,6 +437,11 @@
   flex-direction: column;
 }
 
+.field-block[hidden],
+[data-signup-filled][hidden] {
+  display: none !important;
+}
+
 .field-block-wide {
   grid-column: 1 / -1;
 }
@@ -666,6 +671,17 @@
 /* ---------- Tags ---------- */
 .tag-section {
   margin-top: 1.4rem;
+}
+
+.inline-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--muted);
+  cursor: pointer;
 }
 
 .tag-section h3 {

@@ -199,6 +199,42 @@ def clean_name(value):
     return value
 
 
+# Name parts are validated separately so digits and symbols cannot
+# be used in a first, middle, or last name.
+NAME_PART_MAX_LENGTH = 50
+
+
+def clean_name_part(value):
+    """
+    Return one trimmed name part, or None.
+
+    Letters (including ñ and accented letters), spaces, hyphens,
+    apostrophes and periods are allowed. Digits and other symbols
+    are rejected.
+    """
+    value = re.sub(r"\s+", " ", str(value or "").strip())
+    if not value or len(value) > NAME_PART_MAX_LENGTH:
+        return None
+    if not any(character.isalpha() for character in value):
+        return None
+    if any(
+        not (character.isalpha() or character in " .'-")
+        for character in value
+    ):
+        return None
+    return value
+
+
+def compose_name(first_name, middle_name, last_name):
+    """Build the display name stored in users.name."""
+    parts = [
+        part
+        for part in (first_name, middle_name, last_name)
+        if part
+    ]
+    return " ".join(parts)
+
+
 def clean_role(value):
     """Only student and tutor can self-register. Admin is CLI-only."""
     return value if value in ("student", "tutor") else None

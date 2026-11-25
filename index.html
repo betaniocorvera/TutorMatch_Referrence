@@ -455,88 +455,33 @@
           <!-- CSRF token: filled by script.js from GET /api/csrf -->
           <input type="hidden" id="register-csrf" name="csrf_token" value="" />
 
-          <fieldset class="role-fieldset">
-            <legend class="field-label">I am a</legend>
-            <div class="role-grid">
-              <label class="role-card" data-role-card="student" data-selected="true">
-                <input type="radio" name="role" value="student" class="role-radio" checked />
-                <span class="role-icon" aria-hidden="true"><i data-lucide="graduation-cap" class="h-4 w-4"></i></span>
-                <span class="role-title">Student</span>
-                <span class="role-desc">Find a tutor</span>
-              </label>
-              <label class="role-card" data-role-card="tutor" data-selected="false">
-                <input type="radio" name="role" value="tutor" class="role-radio" />
-                <span class="role-icon" aria-hidden="true"><i data-lucide="book-open" class="h-4 w-4"></i></span>
-                <span class="role-title">Tutor</span>
-                <span class="role-desc">Find students</span>
-              </label>
-            </div>
-            <p id="role-helper" class="role-helper">You'll see tutors who match your subject, budget and schedule.</p>
-            <p class="role-note">Role can't be changed later.</p>
-          </fieldset>
-
-          <div>
-            <label for="reg-name" class="field-label">Full name</label>
-            <div class="field-wrap">
-              <i data-lucide="user" class="field-icon"></i>
-              <input id="reg-name" name="name" type="text" autocomplete="name" placeholder="Your name" class="field" required />
-            </div>
-            <p class="field-error" data-error-for="reg-name" role="alert"></p>
+          <div class="rounded-2xl border border-cream-border bg-cream px-4 py-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-studio">One sign-up</p>
+            <h3 class="mt-1 font-serif text-2xl text-ink">Tell us who you are.</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted">
+              Create your account with your personal details, availability, and 3 recovery questions.
+              After email verification you will only set up your photo, subjects, rate or budget,
+              activeness, and session format.
+            </p>
           </div>
 
-          <div>
-            <label for="reg-email" class="field-label">Email</label>
-            <div class="field-wrap">
-              <i data-lucide="mail" class="field-icon"></i>
-              <input id="reg-email" name="email" type="email" autocomplete="email" placeholder="you@email.com" class="field" required />
-            </div>
-            <p class="field-error" data-error-for="reg-email" role="alert"></p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <a href="signup.html?role=student" class="role-card" data-selected="true">
+              <span class="role-icon" aria-hidden="true"><i data-lucide="graduation-cap" class="h-4 w-4"></i></span>
+              <span class="role-title">Student</span>
+              <span class="role-desc">Find a tutor</span>
+            </a>
+            <a href="signup.html?role=tutor" class="role-card" data-selected="false">
+              <span class="role-icon" aria-hidden="true"><i data-lucide="book-open" class="h-4 w-4"></i></span>
+              <span class="role-title">Tutor</span>
+              <span class="role-desc">Find students</span>
+            </a>
           </div>
 
-          <div>
-            <label for="reg-password" class="field-label">Password</label>
-            <div class="field-wrap">
-              <i data-lucide="lock" class="field-icon"></i>
-              <input id="reg-password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" class="field pr-12" required />
-              <button type="button" class="pw-toggle" data-toggle-password="reg-password" aria-label="Show password">
-                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
-                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
-              </button>
-            </div>
-            <div class="strength" aria-hidden="true">
-              <span></span><span></span><span></span><span></span>
-            </div>
-            <p id="strength-label" class="mt-1 text-xs text-muted">Use 8+ characters with letters and numbers.</p>
-            <p class="field-error" data-error-for="reg-password" role="alert"></p>
-          </div>
-
-          <div>
-            <label for="reg-confirm" class="field-label">Confirm password</label>
-            <div class="field-wrap">
-              <i data-lucide="shield-check" class="field-icon"></i>
-              <input id="reg-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="Repeat password" class="field pr-12" required />
-              <button type="button" class="pw-toggle" data-toggle-password="reg-confirm" aria-label="Show password">
-                <i data-lucide="eye" class="eye-on h-4 w-4"></i>
-                <i data-lucide="eye-off" class="eye-off hidden h-4 w-4"></i>
-              </button>
-            </div>
-            <p class="field-error" data-error-for="reg-confirm" role="alert"></p>
-          </div>
-
-          <div>
-            <label class="flex cursor-pointer items-start gap-2.5 text-sm leading-snug text-muted">
-              <input id="reg-terms" name="terms" type="checkbox" class="check mt-0.5" />
-              <span>I agree to the <a href="#terms" class="font-semibold text-ink underline decoration-studio underline-offset-2">Terms</a> and <a href="#privacy" class="font-semibold text-ink underline decoration-studio underline-offset-2">Privacy Policy</a>.</span>
-            </label>
-            <p class="field-error" data-error-for="reg-terms" role="alert"></p>
-          </div>
-
-          <p id="register-status" class="form-status" role="alert" aria-live="polite"></p>
-
-          <button type="submit" class="submit-btn group">
-            <span>Create Account</span>
+          <a href="signup.html" class="submit-btn group">
+            <span>Start sign-up</span>
             <span class="submit-arrow" aria-hidden="true"><i data-lucide="arrow-up-right" class="h-4 w-4"></i></span>
-          </button>
+          </a>
 
           <p class="pt-1 text-center text-sm text-muted">
             Already have an account?

@@ -63,6 +63,25 @@
 
   const REQUIRED_FIELDS = ['bio', 'subjects', 'availability', 'rate', 'budget', 'format', 'area'];
 
+  function visibleStepIds() {
+    return STEPS
+      .filter((step) => !state.skippedSteps.has(step.id))
+      .map((step) => step.id);
+  }
+
+  function firstVisibleFrom(step) {
+    const ids = visibleStepIds();
+    if (!ids.length) return 1;
+    return ids.find((id) => id >= step) || ids[ids.length - 1];
+  }
+
+  function neighbourStep(step, direction) {
+    const ids = visibleStepIds();
+    const index = ids.indexOf(step);
+    if (index === -1) return null;
+    return ids[index + direction] ?? null;
+  }
+
   const state = {
     profile: null,
     catalog: [],
@@ -72,6 +91,7 @@
     step: 1,
     maxStep: 1,
     edit: false,
+    skippedSteps: new Set(),
     saving: false,
     savePromise: null,
     saveTimer: null,
@@ -401,35 +421,42 @@
   function renderStepList() {
     const list = $('#step-list');
     if (!list) return;
-    list.innerHTML = STEPS.map((step) => {
-      const active = step.id === state.step;
-      const done = step.id < state.step;
-      const locked = step.id > state.maxStep && !state.edit;
-      return `
-        <li>
-          <button type="button"
-            class="step-item ${active ? 'is-active' : ''} ${done ? 'is-done' : ''}"
-            data-step="${step.id}"
-            ${locked ? 'disabled' : ''}
-            ${active ? 'aria-current="step"' : ''}>
-            <span class="step-index">${done ? '✓' : step.id}</span>
-            <span class="step-copy">
-              <strong>${step.label}</strong>
-              <span>${step.hint}</span>
-            </span>
-          </button>
-        </li>
-      `;
-    }).join('');
+    const ids = visibleStepIds();
+    const currentIndex = ids.indexOf(state.step);
+    list.innerHTML = STEPS
+      .filter((step) => !state.skippedSteps.has(step.id))
+      .map((step, index) => {
+        const active = step.id === state.step;
+        const done = index < currentIndex;
+        const locked = step.id > state.maxStep && !state.edit;
+        return `
+          <li>
+            <button type="button"
+              class="step-item ${active ? 'is-active' : ''} ${done ? 'is-done' : ''}"
+              data-step="${step.id}"
+              ${locked ? 'disabled' : ''}
+              ${active ? 'aria-current="step"' : ''}>
+              <span class="step-index">${done ? '✓' : index + 1}</span>
+              <span class="step-copy">
+                <strong>${step.label}</strong>
+                <span>${step.hint}</span>
+              </span>
+            </button>
+          </li>
+        `;
+      }).join('');
   }
 
   function renderProgress() {
     const counter = $('#step-counter');
     const fill = $('#wizard-progress-fill');
     const track = $('.wizard-progress');
-    if (counter) counter.textContent = `Step ${state.step} of 8`;
-    if (fill) fill.style.width = `${(state.step / 8) * 100}%`;
-    if (track) track.setAttribute('aria-valuenow', String(state.step));
+    const ids = visibleStepIds();
+    const position = Math.max(1, ids.indexOf(state.step) + 1);
+    const total = Math.max(1, ids.length);
+    if (counter) counter.textContent = `Step ${position} of ${total}`;
+    if (fill) fill.style.width = `${(position / total) * 100}%`;
+    if (track) track.setAttribute('aria-valuenow', String(position));
   }
 
   function renderBasics() {
@@ -625,10 +652,38 @@
 
   function renderArea() {
     if (!state.profile) return;
+    const profile = state.profile;
     const barangay = $('#ob-barangay');
     const city = $('#ob-city');
-    if (barangay) barangay.value = (state.profile.area && state.profile.area.barangay) || '';
-    if (city) city.value = (state.profile.area && state.profile.area.city) || 'Cabadbaran City';
+    if (barangay) barangay.value = (profile.area && profile.area.barangay) || '';
+    if (city) city.value = (profile.area && profile.area.city) || 'Cabadbaran City';
+
+    const textFields = {
+      'ob-gender': profile.gender || '',
+      'ob-phone': profile.phone || '',
+      'ob-address-line': profile.addressLine || '',
+      'ob-province': profile.province || '',
+      'ob-postal-code': profile.postalCode || '',
+      'ob-school': profile.school || '',
+      'ob-grade-level': profile.gradeLevel || '',
+      'ob-course': profile.course || '',
+      'ob-education': profile.education || '',
+      'ob-experience-years': profile.experienceYears ?? ''
+    };
+    Object.entries(textFields).forEach(([id, value]) => {
+      const field = $('#' + id);
+      if (field) field.value = value;
+    });
+
+    const showPhone = $('#ob-show-phone');
+    const showAddress = $('#ob-show-address');
+    if (showPhone) showPhone.checked = !!profile.showPhone;
+    if (showAddress) showAddress.checked = !!profile.showAddress;
+
+    $$('[data-role-field]', $('.step-panel[data-panel="6"]')).forEach((field) => {
+      const isTutorField = field.dataset.roleField === 'tutor';
+      field.hidden = profile.role === 'tutor' ? !isTutorField : isTutorField;
+    });
   }
 
   function renderSecurityStep() {
@@ -842,7 +897,10 @@
   }
 
   function goToStep(step, options = {}) {
-    const next = clamp(Number(step) || 1, 1, 8);
+    let next = clamp(Number(step) || 1, 1, 8);
+    if (!state.edit && state.skippedSteps.has(next)) {
+      next = firstVisibleFrom(next);
+    }
     state.step = next;
 
     $$('.step-panel').forEach((panel) => {
@@ -852,16 +910,23 @@
     renderStepList();
     renderProgress();
 
+    const ids = visibleStepIds();
+    const position = Math.max(1, ids.indexOf(next) + 1);
+    const lastVisible = ids[ids.length - 1];
+    const eyebrow = $(`.step-panel[data-panel="${next}"] .eyebrow`);
+    if (eyebrow) eyebrow.textContent = `Step ${position}`;
+
     const nextButton = $('#next-btn');
     const finishButton = $('#finish-btn');
     const footerNote = $('#step-footer-note');
     if (nextButton) {
-      nextButton.classList.toggle('hidden', next === 8);
-      nextButton.textContent = next === 6 ? 'Review profile' : 'Continue';
+      nextButton.classList.toggle('hidden', next === lastVisible);
+      const upcoming = neighbourStep(next, 1);
+      nextButton.textContent = upcoming === 7 ? 'Review profile' : 'Continue';
     }
-    if (finishButton) finishButton.classList.toggle('hidden', next !== 8);
+    if (finishButton) finishButton.classList.toggle('hidden', next !== lastVisible);
     if (footerNote) {
-      footerNote.textContent = next === 8
+      footerNote.textContent = next === lastVisible
         ? 'You can change these later in your profile.'
         : next === 3
           ? 'Optional step'
@@ -1000,6 +1065,28 @@
         setFieldError('city', 'Keep the city under 80 characters.');
         ok = false;
       }
+
+      const phone = String(profile.phone || '').trim();
+      if (phone) {
+        const digits = phone.replace(/\D/g, '');
+        if (digits.length < 7 || digits.length > 15 || !/^\+?[0-9 ()\-]+$/.test(phone)) {
+          setFieldError('phone', 'Enter a valid phone number.');
+          ok = false;
+        }
+      }
+      const postal = String(profile.postalCode || '').trim();
+      if (postal && !/^\d{4,10}$/.test(postal)) {
+        setFieldError('postalCode', 'Use a 4-10 digit ZIP code.');
+        ok = false;
+      }
+      const experience = profile.experienceYears;
+      if (experience !== null && experience !== undefined && experience !== '') {
+        const years = Number(experience);
+        if (!Number.isInteger(years) || years < 0 || years > 60) {
+          setFieldError('experienceYears', 'Enter a whole number between 0 and 60.');
+          ok = false;
+        }
+      }
     }
 
     if (step === 7) {
@@ -1071,6 +1158,18 @@
         barangay: String(profile.area && profile.area.barangay || '').trim(),
         city: String(profile.area && profile.area.city || '').trim()
       };
+      payload.gender = profile.gender || '';
+      payload.phone = profile.phone || '';
+      payload.addressLine = profile.addressLine || '';
+      payload.province = profile.province || '';
+      payload.postalCode = profile.postalCode || '';
+      payload.school = profile.school || '';
+      payload.gradeLevel = profile.gradeLevel || '';
+      payload.course = profile.course || '';
+      payload.education = profile.education || '';
+      payload.experienceYears = profile.experienceYears ?? '';
+      payload.showPhone = !!profile.showPhone;
+      payload.showAddress = !!profile.showAddress;
     }
 
     payload.onboardingStep = nextStep || state.maxStep;
@@ -1137,11 +1236,11 @@
 
   async function nextStep() {
     if (!validateStep(state.step)) return;
-    if (state.step === 8) {
+    const next = neighbourStep(state.step, 1);
+    if (!next) {
       await finish();
       return;
     }
-    const next = Math.min(8, state.step + 1);
     const ok = await saveStep({ nextStep: next });
     if (!ok) return;
     state.maxStep = Math.max(state.maxStep, next);
@@ -1149,14 +1248,16 @@
   }
 
   async function prevStep() {
-    if (state.step <= 1) return;
+    const previous = neighbourStep(state.step, -1);
+    if (!previous) return;
     await saveStep({});
-    goToStep(state.step - 1);
+    goToStep(previous);
   }
 
   async function handleStepClick(step) {
     if (!state.profile) return;
     if (step === state.step) return;
+    if (state.skippedSteps.has(step)) return;
     if (step > state.maxStep && !state.edit) return;
     await saveStep({});
     goToStep(step);
@@ -1175,7 +1276,7 @@
 
   async function finish() {
     if (!validateStep(7)) return;
-    if (!validateStep(8)) return;
+    if (!state.skippedSteps.has(8) && !validateStep(8)) return;
 
     const profile = state.profile;
     const payload = {
@@ -1209,9 +1310,11 @@
 
     setSaving('saving', 'Finishing…');
     try {
-      await auth.saveSecurityQuestions({
-        questions: securityAnswersFromForm()
-      });
+      if (!state.skippedSteps.has(8)) {
+        await auth.saveSecurityQuestions({
+          questions: securityAnswersFromForm()
+        });
+      }
       const saved = await auth.updateProfile(payload);
       state.profile = saved;
       auth.setProfileCompleteness(saved.completeness);
@@ -1379,6 +1482,54 @@
         if (!Number.isFinite(state.profile.budgetMaxCentavos)) state.profile.budgetMaxCentavos = null;
         scheduleAutosave();
         break;
+      case 'ob-gender':
+        state.profile.gender = target.value || null;
+        scheduleAutosave();
+        break;
+      case 'ob-phone':
+        state.profile.phone = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-address-line':
+        state.profile.addressLine = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-province':
+        state.profile.province = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-postal-code':
+        state.profile.postalCode = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-school':
+        state.profile.school = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-grade-level':
+        state.profile.gradeLevel = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-course':
+        state.profile.course = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-education':
+        state.profile.education = target.value;
+        scheduleAutosave();
+        break;
+      case 'ob-experience-years':
+        state.profile.experienceYears = target.value === '' ? null : Number(target.value);
+        scheduleAutosave();
+        break;
+      case 'ob-show-phone':
+        state.profile.showPhone = target.checked;
+        scheduleAutosave();
+        break;
+      case 'ob-show-address':
+        state.profile.showAddress = target.checked;
+        scheduleAutosave();
+        break;
       case 'ob-barangay':
         state.profile.area = {
           ...(state.profile.area || {}),
@@ -1424,7 +1575,7 @@
       return;
     }
 
-    if (target.id === 'ob-status' || target.id === 'ob-birthdate') {
+    if (target.id && target.id.startsWith('ob-')) {
       handleInput(event);
     }
   }
@@ -1536,6 +1687,29 @@
     });
   }
 
+  function applyPostSignupBasics() {
+    if (!state.profile) return;
+    const profile = state.profile;
+    // A full sign-up already collected the name, bio, and birthdate.
+    // For new accounts the first step only needs the photo and status.
+    // Edit mode and legacy profiles keep every basics field visible.
+    const cameFromSignup = Boolean(
+      String(profile.bio || '').trim()
+      && profile.birthdate
+      && String(profile.name || '').trim()
+    );
+    const hide = cameFromSignup && !state.edit;
+    $$('[data-signup-filled]').forEach((field) => {
+      field.hidden = hide;
+    });
+    const copy = $('.step-panel[data-panel="1"] .step-head p:not(.eyebrow)');
+    if (copy && hide) {
+      copy.textContent =
+        'Add a photo and set your status. Your name, bio, and birthdate ' +
+        'came from sign-up and can be edited later from your profile.';
+    }
+  }
+
   async function init() {
     bindEvents();
 
@@ -1565,7 +1739,27 @@
       state.catalog = catalog || [];
       state.securityBank = securityBank || [];
       state.savedSecurityKeys = (savedQuestions || []).map((question) => question.key);
-      state.step = state.edit ? 1 : clamp(Number(profile.onboardingStep) || 1, 1, 8);
+      applyPostSignupBasics();
+
+      // New accounts already gave these during sign-up, so the
+      // profile customization only asks for photo, subjects, rate
+      // or budget, activeness, tags, and format. Edit mode keeps
+      // every step so the details stay editable.
+      state.skippedSteps = new Set();
+      if (!state.edit) {
+        if ((profile.availability || []).length) state.skippedSteps.add(4);
+        if (profile.area && String(profile.area.barangay || '').trim()) {
+          state.skippedSteps.add(6);
+        }
+        if (profile.securityQuestionsSet) state.skippedSteps.add(8);
+      }
+
+      const requestedStep = state.edit
+        ? 1
+        : clamp(Number(profile.onboardingStep) || 1, 1, 8);
+      state.step = state.skippedSteps.has(requestedStep)
+        ? firstVisibleFrom(requestedStep)
+        : requestedStep;
       state.maxStep = state.edit ? 8 : state.step;
 
       renderAll();

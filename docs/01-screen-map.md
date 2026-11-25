@@ -139,8 +139,8 @@ stateDiagram-v2
 | ID | Route | Role | Purpose | Primary actions | Key states |
 |---|---|---|---|---|---|
 | PUB-01 | `/` | Guest | Explain the product and convert | Sign up, log in, watch how it works | Default, video unavailable |
-| AUTH-01 | `/register` | Guest | Choose Student or Tutor | Continue | Role unselected, role selected |
-| AUTH-02 | `/register/student`, `/register/tutor` | Guest | Create an account | Register, log in | Validation, submitting, error |
+| AUTH-01 | `/signup?role=student` or `/signup?role=tutor` | Guest | Choose Student or Tutor, then provide account details | Continue | Role unselected, role selected |
+| AUTH-02 | `/signup` | Guest | Create an account with full details and recovery questions | Create account, verify email, log in | Validation, submitting, OTP, error |
 | AUTH-03 | `/login` | Guest | Return to the app | Log in, forgot password | Validation, submitting, error |
 | AUTH-04 | `/forgot-password` | Guest | Request a reset link (V1.5) | Send reset link | Sent, error |
 | ONB-01 | `/onboarding` | Student/Tutor | Complete the matching profile | Save and continue, back, finish | Step invalid, saving, incomplete |
@@ -178,33 +178,52 @@ stateDiagram-v2
 - CTA disabled until a role is selected.
 - Mobile: stacked cards. Desktop: side-by-side cards.
 
-### AUTH-02 — Register
+### AUTH-02 — Sign up
 
-- Fields: full name, email, password, confirm password, terms checkbox.
-- Role is displayed as a read-only chip and is not editable here.
-- No profile fields in registration. Profile setup happens in onboarding.
-- CTA: **Create account**.
+Dedicated page `signup.html` with 3 steps plus OTP verification. The landing
+page's register tab is a link to this page.
+
+1. **Account** — role (Student or Tutor), first name, optional middle name,
+   last name, email, password, confirm password, terms.
+2. **About you** — birthdate, gender, phone, address, barangay, city,
+   province, ZIP, headline, bio, school and grade/course or
+   education/experience, weekly availability, and `showPhone` /
+   `showAddress` privacy toggles.
+3. **Recovery** — 3 different security questions and answers.
+
+- Required: role, first and last name, email, password + confirm,
+  birthdate, bio, barangay, city, at least one availability slot, 3
+  questions, and terms.
+- Names accept letters plus spaces, hyphens, apostrophes, and periods only.
+- The account, profile, availability, and hashed answers are saved in one
+  transaction. The page then asks for the emailed 6-digit code.
+- After verification the user continues to onboarding for profile
+  customization only.
+- CTA: **Create account**, then **Verify email**.
 - Link: “Already have an account? Log in.”
-- Inline validation and a clear error summary.
 
 ### AUTH-03 — Login
 
-- Fields: email, password, remember me.
+- Fields: email, password, remember me, Google reCAPTCHA v2.
 - Actions: **Log in**, **Forgot password?**
 - Link: “New to TutorMatch? Create an account.”
 - After login: onboarding if incomplete, otherwise search.
 
 ### ONB-01 — Onboarding wizard
 
-Seven steps with a progress indicator. Autosave after each step.
+Eight steps with a progress indicator. Autosave after each step.
 
 1. **Basics** — photo, display name, bio, birthdate (private), status.
 2. **Subjects and levels** — what the tutor teaches or the student needs.
 3. **Goals and style** — learning goal, teaching/learning style.
 4. **Availability** — weekly slots using a 30- or 60-minute grid.
 5. **Rate or budget and format** — hourly rate for tutors, budget range for students, online/in-person/both.
-6. **Area** — barangay and city; no exact address.
+6. **Area and personal details** — barangay, city, gender, phone, address, school/course or education/experience, and the phone/address privacy toggles; no exact address in public results.
 7. **Preview** — see the public profile and finish.
+8. **Recovery** — 3 security questions.
+
+New accounts skip steps 4, 6, and 8 because sign-up already collected that
+information. Edit mode keeps all steps.
 
 Rules:
 - Required fields cannot be skipped.

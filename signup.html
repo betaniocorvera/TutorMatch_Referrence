@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Create your TutorMatch A.I. account with your profile details and recovery questions." />
+  <title>TutorMatch A.I. — Create your account</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: { DEFAULT: '#F5EFE6', soft: '#FAF7F2', border: '#EADFCF' },
+            studio: '#DE5D35',
+            ink: '#161514',
+            muted: '#635E59'
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            serif: ['"Instrument Serif"', 'ui-serif', 'Georgia', 'serif']
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="signup.css" />
+</head>
+<body class="signup-body antialiased">
+  <header class="signup-header">
+    <a href="index.html" class="signup-logo" aria-label="TutorMatch A.I. home">
+      TutorMatch <span>A.I.</span>
+    </a>
+    <a href="index.html" class="signup-back">
+      <i data-lucide="arrow-left" class="h-4 w-4"></i>
+      Back to home
+    </a>
+  </header>
+
+  <main class="signup-shell">
+    <!-- ================= SIGN-UP ================= -->
+    <div id="signup-app">
+      <div class="signup-intro">
+        <p class="signup-eyebrow">Create your account</p>
+        <h1>Everything we need, in one sign-up.</h1>
+        <p>
+          Your personal details and recovery questions are collected here.
+          After you verify your email, you will only set up your photo,
+          subjects, rate or budget, activeness, and session format.
+        </p>
+      </div>
+
+      <div class="signup-progress" aria-label="Sign-up progress">
+        <div class="signup-progress-track" role="progressbar" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1">
+          <span id="signup-progress-fill"></span>
+        </div>
+        <ol class="signup-steps">
+          <li data-step-pill="1" class="is-active"><span>1</span>Account</li>
+          <li data-step-pill="2"><span>2</span>About you</li>
+          <li data-step-pill="3"><span>3</span>Recovery</li>
+        </ol>
+      </div>
+
+      <form id="signup-form" class="signup-card" novalidate>
+        <!-- ---------- Step 1: Account ---------- -->
+        <section class="signup-panel is-active" data-step-panel="1">
+          <div class="signup-panel-head">
+            <p class="signup-eyebrow">Step 1 of 3</p>
+            <h2 tabindex="-1">Your account</h2>
+            <p>Choose your role and enter the name and email you will use on TutorMatch.</p>
+          </div>
+
+          <fieldset class="role-fieldset">
+            <legend class="field-label">I am a</legend>
+            <div class="role-grid">
+              <label class="role-card" data-role-card="student" data-selected="true">
+                <input type="radio" name="role" value="student" class="role-radio" checked />
+                <span class="role-icon" aria-hidden="true"><i data-lucide="graduation-cap" class="h-4 w-4"></i></span>
+                <span class="role-title">Student</span>
+                <span class="role-desc">Find a tutor</span>
+              </label>
+              <label class="role-card" data-role-card="tutor" data-selected="false">
+                <input type="radio" name="role" value="tutor" class="role-radio" />
+                <span class="role-icon" aria-hidden="true"><i data-lucide="book-open" class="h-4 w-4"></i></span>
+                <span class="role-title">Tutor</span>
+                <span class="role-desc">Find students</span>
+              </label>
+            </div>
+            <p class="role-note">Role cannot be changed later.</p>
+            <p class="field-error" data-error-for="role" role="alert"></p>
+          </fieldset>
+
+          <div class="signup-grid signup-grid-3">
+            <div>
+              <label for="signup-first-name" class="field-label">First name</label>
+              <div class="field-wrap">
+                <i data-lucide="user" class="field-icon"></i>
+                <input id="signup-first-name" name="firstName" type="text" autocomplete="given-name"
+                       maxlength="50" placeholder="Juan" class="field" required />
+              </div>
+              <p class="field-error" data-error-for="firstName" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-middle-name" class="field-label">Middle name <span class="signup-optional">Optional</span></label>
+              <div class="field-wrap">
+                <i data-lucide="user" class="field-icon"></i>
+                <input id="signup-middle-name" name="middleName" type="text" autocomplete="additional-name"
+                       maxlength="50" placeholder="Dela" class="field" />
+              </div>
+              <p class="field-error" data-error-for="middleName" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-last-name" class="field-label">Last name</label>
+              <div class="field-wrap">
+                <i data-lucide="user" class="field-icon"></i>
+                <input id="signup-last-name" name="lastName" type="text" autocomplete="family-name"
+                       maxlength="50" placeholder="Cruz" class="field" required />
+              </div>
+              <p class="field-error" data-error-for="lastName" role="alert"></p>
+            </div>
+          </div>
+          <p class="signup-hint">Names may use letters, spaces, hyphens, apostrophes and periods. Numbers are not allowed.</p>
+
+          <div class="signup-grid">
+            <div>
+              <label for="signup-email" class="field-label">Email</label>
+              <div class="field-wrap">
+                <i data-lucide="mail" class="field-icon"></i>
+                <input id="signup-email" name="email" type="email" autocomplete="email"
+                       placeholder="you@email.com" class="field" required />
+              </div>
+              <p class="field-error" data-error-for="email" role="alert"></p>
+            </div>
+          </div>
+
+          <div class="signup-grid">
+            <div>
+              <label for="signup-password" class="field-label">Password</label>
+              <div class="field-wrap">
+                <i data-lucide="lock" class="field-icon"></i>
+                <input id="signup-password" name="password" type="password" autocomplete="new-password"
+                       placeholder="At least 8 characters" class="field" required />
+              </div>
+              <p class="signup-hint">Use 8+ characters with at least one letter and one number.</p>
+              <p class="field-error" data-error-for="password" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-confirm" class="field-label">Confirm password</label>
+              <div class="field-wrap">
+                <i data-lucide="shield-check" class="field-icon"></i>
+                <input id="signup-confirm" name="confirmPassword" type="password" autocomplete="new-password"
+                       placeholder="Repeat password" class="field" required />
+              </div>
+              <p class="field-error" data-error-for="confirmPassword" role="alert"></p>
+            </div>
+          </div>
+
+          <label class="signup-check">
+            <input id="signup-terms" name="terms" type="checkbox" class="check" />
+            <span>
+              I agree to the <a href="index.html#terms">Terms</a> and
+              <a href="index.html#privacy">Privacy Policy</a>.
+            </span>
+          </label>
+          <p class="field-error" data-error-for="terms" role="alert"></p>
+        </section>
+
+        <!-- ---------- Step 2: About you ---------- -->
+        <section class="signup-panel" data-step-panel="2">
+          <div class="signup-panel-head">
+            <p class="signup-eyebrow">Step 2 of 3</p>
+            <h2 tabindex="-1">About you</h2>
+            <p>This information stays on your account. Only your barangay and city are shown publicly.</p>
+          </div>
+
+          <div class="signup-grid signup-grid-3">
+            <div>
+              <label for="signup-birthdate" class="field-label">Birthdate</label>
+              <input id="signup-birthdate" name="birthdate" type="date" class="field" required />
+              <p class="field-error" data-error-for="birthdate" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-gender" class="field-label">Gender <span class="signup-optional">Optional</span></label>
+              <select id="signup-gender" name="gender" class="field">
+                <option value="">Prefer not to say</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+                <option value="prefer_not_to_say">Prefer not to say</option>
+              </select>
+              <p class="field-error" data-error-for="gender" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-phone" class="field-label">Phone <span class="signup-optional">Optional</span></label>
+              <div class="field-wrap">
+                <i data-lucide="phone" class="field-icon"></i>
+                <input id="signup-phone" name="phone" type="tel" autocomplete="tel"
+                       maxlength="20" placeholder="0917 123 4567" class="field" />
+              </div>
+              <p class="field-error" data-error-for="phone" role="alert"></p>
+            </div>
+          </div>
+
+          <div class="signup-grid">
+            <div>
+              <label for="signup-address-line" class="field-label">
+                House / street / purok <span class="signup-optional">Optional</span>
+              </label>
+              <div class="field-wrap">
+                <i data-lucide="home" class="field-icon"></i>
+                <input id="signup-address-line" name="addressLine" type="text" autocomplete="street-address"
+                       maxlength="160" placeholder="Purok 2, Poblacion" class="field" />
+              </div>
+              <p class="field-error" data-error-for="addressLine" role="alert"></p>
+            </div>
+          </div>
+
+          <div class="signup-grid signup-grid-4">
+            <div>
+              <label for="signup-barangay" class="field-label">Barangay</label>
+              <div class="field-wrap">
+                <i data-lucide="map-pin" class="field-icon"></i>
+                <input id="signup-barangay" name="barangay" type="text" autocomplete="address-line2"
+                       maxlength="80" placeholder="Barangay 1" class="field" required />
+              </div>
+              <p class="field-error" data-error-for="barangay" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-city" class="field-label">City / municipality</label>
+              <input id="signup-city" name="city" type="text" autocomplete="address-level2"
+                     maxlength="80" value="Cabadbaran City" class="field" required />
+              <p class="field-error" data-error-for="city" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-province" class="field-label">Province <span class="signup-optional">Optional</span></label>
+              <input id="signup-province" name="province" type="text" autocomplete="address-level1"
+                     maxlength="80" placeholder="Agusan del Norte" class="field" />
+              <p class="field-error" data-error-for="province" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-postal-code" class="field-label">ZIP code <span class="signup-optional">Optional</span></label>
+              <input id="signup-postal-code" name="postalCode" type="text" inputmode="numeric"
+                     autocomplete="postal-code" maxlength="10" placeholder="8600" class="field" />
+              <p class="field-error" data-error-for="postalCode" role="alert"></p>
+            </div>
+          </div>
+
+          <div class="signup-grid">
+            <div>
+              <label for="signup-headline" class="field-label">Headline <span class="signup-optional">Optional</span></label>
+              <div class="field-wrap">
+                <i data-lucide="sparkles" class="field-icon"></i>
+                <input id="signup-headline" name="headline" type="text" maxlength="120"
+                       placeholder="Patient math tutor for senior high" class="field" />
+              </div>
+              <p class="field-error" data-error-for="headline" role="alert"></p>
+            </div>
+          </div>
+
+          <div>
+            <label for="signup-bio" class="field-label">Bio</label>
+            <textarea id="signup-bio" name="bio" class="field signup-textarea" maxlength="600"
+                      placeholder="Tell people a little about yourself, what you teach or want to learn, and how you like sessions to go." required></textarea>
+            <p class="signup-hint"><span id="signup-bio-count">0</span>/600 characters (at least 10)</p>
+            <p class="field-error" data-error-for="bio" role="alert"></p>
+          </div>
+
+          <div class="signup-subhead">
+            <h3>School and study</h3>
+            <p id="signup-role-explainer">These details appear on your public profile.</p>
+          </div>
+
+          <div class="signup-grid signup-grid-3">
+            <div>
+              <label for="signup-school" class="field-label">School / university <span class="signup-optional">Optional</span></label>
+              <input id="signup-school" name="school" type="text" maxlength="120"
+                     placeholder="CSU Cabadbaran" class="field" />
+              <p class="field-error" data-error-for="school" role="alert"></p>
+            </div>
+            <div data-role-field="student">
+              <label for="signup-grade-level" class="field-label">Grade / year level <span class="signup-optional">Optional</span></label>
+              <input id="signup-grade-level" name="gradeLevel" type="text" maxlength="40"
+                     placeholder="Grade 11" class="field" />
+              <p class="field-error" data-error-for="gradeLevel" role="alert"></p>
+            </div>
+            <div>
+              <label for="signup-course" class="field-label">Course / strand <span class="signup-optional">Optional</span></label>
+              <input id="signup-course" name="course" type="text" maxlength="120"
+                     placeholder="STEM" class="field" />
+              <p class="field-error" data-error-for="course" role="alert"></p>
+            </div>
+            <div data-role-field="tutor" hidden>
+              <label for="signup-education" class="field-label">Highest education <span class="signup-optional">Optional</span></label>
+              <input id="signup-education" name="education" type="text" maxlength="80"
+                     placeholder="College graduate" class="field" />
+              <p class="field-error" data-error-for="education" role="alert"></p>
+            </div>
+            <div data-role-field="tutor" hidden>
+              <label for="signup-experience" class="field-label">Years of experience <span class="signup-optional">Optional</span></label>
+              <input id="signup-experience" name="experienceYears" type="number" min="0" max="60"
+                     inputmode="numeric" placeholder="3" class="field" />
+              <p class="field-error" data-error-for="experienceYears" role="alert"></p>
+            </div>
+          </div>
+
+          <div class="signup-subhead">
+            <h3>Weekly availability</h3>
+            <p>Pick at least one slot. You can change this later.</p>
+          </div>
+          <div id="available-grid" class="available-grid" role="group" aria-label="Weekly availability"></div>
+          <p class="field-error" data-error-for="availability" role="alert"></p>
+
+          <div class="signup-privacy">
+            <h3>Privacy on your profile</h3>
+            <label class="signup-check">
+              <input id="signup-show-phone" name="showPhone" type="checkbox" class="check" />
+              <span>Show my phone number to people I have an accepted match with.</span>
+            </label>
+            <label class="signup-check">
+              <input id="signup-show-address" name="showAddress" type="checkbox" class="check" />
+              <span>Show my full address to people I have an accepted match with.</span>
+            </label>
+            <p class="signup-hint">
+              Your phone and full address are never shown in public search. Your barangay,
+              city, gender, school, course, education, and experience can appear on your profile.
+            </p>
+          </div>
+        </section>
+
+        <!-- ---------- Step 3: Recovery ---------- -->
+        <section class="signup-panel" data-step-panel="3">
+          <div class="signup-panel-head">
+            <p class="signup-eyebrow">Step 3 of 3</p>
+            <h2 tabindex="-1">Account recovery</h2>
+            <p>Pick 3 different questions. You will answer them before a password reset.</p>
+          </div>
+
+          <div class="signup-security-list" id="signup-security-list">
+            <div class="signup-security-row" data-security-row="1">
+              <label class="field-label" for="signup-security-key-1">Question 1</label>
+              <select id="signup-security-key-1" class="field" data-security-key="1"></select>
+              <input id="signup-security-answer-1" class="field" type="text" maxlength="100"
+                     autocomplete="off" placeholder="Your answer" data-security-answer="1" />
+            </div>
+            <div class="signup-security-row" data-security-row="2">
+              <label class="field-label" for="signup-security-key-2">Question 2</label>
+              <select id="signup-security-key-2" class="field" data-security-key="2"></select>
+              <input id="signup-security-answer-2" class="field" type="text" maxlength="100"
+                     autocomplete="off" placeholder="Your answer" data-security-answer="2" />
+            </div>
+            <div class="signup-security-row" data-security-row="3">
+              <label class="field-label" for="signup-security-key-3">Question 3</label>
+              <select id="signup-security-key-3" class="field" data-security-key="3"></select>
+              <input id="signup-security-answer-3" class="field" type="text" maxlength="100"
+                     autocomplete="off" placeholder="Your answer" data-security-answer="3" />
+            </div>
+          </div>
+          <p class="field-error" data-error-for="securityQuestions" role="alert"></p>
+
+          <p class="signup-note">
+            <i data-lucide="shield-check" class="h-4 w-4"></i>
+            Answers are hashed. They are never shown on your profile or to other users.
+          </p>
+        </section>
+
+        <p id="signup-status" class="form-status" role="alert" aria-live="polite"></p>
+
+        <div class="signup-footer">
+          <button type="button" id="signup-back" class="signup-btn-ghost" data-action="back">Back</button>
+          <div class="signup-footer-actions">
+            <span id="signup-footer-note" class="signup-hint"></span>
+            <button type="button" id="signup-next" class="signup-btn" data-action="next">
+              Continue
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+            <button type="submit" id="signup-submit" class="signup-btn hidden">
+              Create account
+              <i data-lucide="arrow-up-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <p class="signup-login-note">
+        Already have an account?
+        <a href="index.html?login=1">Log in</a>
+      </p>
+    </div>
+
+    <!-- ================= VERIFY ================= -->
+    <div id="signup-verify" class="signup-card signup-verify hidden">
+      <div class="signup-panel-head">
+        <p class="signup-eyebrow">Almost done</p>
+        <h1 tabindex="-1">Check your email.</h1>
+        <p>
+          Enter the 6-digit code we sent to
+          <strong id="verify-email-display"></strong>.
+        </p>
+      </div>
+
+      <form id="verify-form" class="signup-verify-form" novalidate>
+        <div>
+          <label for="verify-otp" class="field-label">6-digit code</label>
+          <div class="field-wrap">
+            <i data-lucide="shield-check" class="field-icon"></i>
+            <input id="verify-otp" name="otp" type="text" inputmode="numeric" maxlength="6"
+                   pattern="[0-9]*" autocomplete="one-time-code" placeholder="000000"
+                   class="field signup-otp" required />
+          </div>
+          <p class="field-error" data-error-for="otp" role="alert"></p>
+        </div>
+
+        <p id="verify-status" class="form-status" role="alert" aria-live="polite"></p>
+
+        <button type="submit" class="signup-btn signup-btn-wide">
+          Verify email
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </button>
+
+        <div class="signup-verify-actions">
+          <button type="button" id="resend-otp" class="signup-link">Resend code</button>
+          <a href="index.html" class="signup-link">Back to home</a>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script src="js/auth.js"></script>
+  <script src="js/signup.js"></script>
+</body>
+</html>
