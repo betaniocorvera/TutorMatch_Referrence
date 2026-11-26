@@ -393,11 +393,13 @@ def session_should_touch():
     return not request.path.startswith(IDLE_EXEMPT_PREFIXES)
 
 
-def touch_user_session():
+def touch_user_session(idle_seconds=None):
     """Slide the idle expiry forward after real activity."""
-    idle_seconds = int(session.get("idle_seconds") or 0)
+    if idle_seconds is None:
+        idle_seconds = int(session.get("idle_seconds") or 0)
     if idle_seconds <= 0:
         return
+    session["idle_seconds"] = int(idle_seconds)
     session["expires_at"] = (
         now_utc() + timedelta(seconds=idle_seconds)
     ).isoformat()

@@ -81,7 +81,7 @@ The seeder creates 4 tutor and 4 student profiles from `mock/seed.json`. Demo ac
 - **Forgot password** — emails a single-use reset link. The link opens `/?reset_token=...`, asks the saved security questions, then shows the reset form.
 - **Reset password** — updates the password hash, invalidates old sessions, and clears lockout state.
 - **Logout** — clears the server session.
-- **Sessions** — Flask session cookie is the source of truth. The dashboard calls `/api/auth/me` before initializing. A normal login uses a sliding idle timeout (`SESSION_IDLE_TIMEOUT_SECONDS` in `app.py`); background notification/message polls do not keep an idle tab alive. "Keep me signed in" uses a fixed 7-day lifetime.
+- **Sessions** — Flask session cookie is the source of truth. The dashboard calls `/api/auth/me` before initializing. A normal login uses a sliding idle timeout in `app.py`; the defense demo uses **10 seconds** (`SESSION_IDLE_TIMEOUT_SECONDS = 10`), and production should use `900` for 15 minutes. The browser pings `/api/session/ping` only after real mouse, keyboard, scroll, or touch activity, while background notification/message polls never extend an AFK tab. "Keep me signed in" uses a fixed 7-day lifetime.
 - **CSRF** — every write sends `X-CSRFToken`; the client fetches it from `/api/csrf` and retries once if the session token expired.
 - **Lockout tiers** — 3 wrong passwords locks for 15 seconds; 3 more for 30 seconds; 3 more for 60 seconds; 3 more for a full 15-minute lock. When the 15-minute lock expires the counter restarts at tier 1. Attempts made during a lock are rejected without counting, and a successful login clears the counter.
 - **Name rules** — first, middle (optional), and last names are 1–50 characters each and accept letters plus spaces, hyphens, apostrophes, and periods only. Digits are rejected. `users.name` is the composed display name used in search, chat, and notifications.
@@ -106,6 +106,8 @@ The wizard has eight steps:
 8. Account recovery — the 3 security questions.
 
 Because the full sign-up already collected availability, area/personal details, and recovery questions, **new accounts skip steps 4, 6, and 8**. Their wizard only asks for photo, subjects, goals/style, rate or budget, format, and the final preview. Skipped steps are hidden from the step rail and progress counter. Edit mode (`/onboarding?edit=1`) keeps every step so all details stay editable.
+
+Existing accounts can use **Edit profile** to add the same name parts and personal details. `migrations/002_backfill_name_parts.py` safely fills first/middle/last from `users.name` where the name can be split; accounts with a single-word or invalid name are left for manual completion. The dashboard profile also shows the public background fields, contact privacy state, and a prompt for missing sign-up details.
 
 Profiles save to MySQL after each step and on text changes (debounced). `Save & exit` stores your progress; the next visit resumes at the furthest saved step. Required fields cannot be skipped, and the completeness meter updates live.
 
@@ -184,6 +186,7 @@ Search results never expose email, birthdate, phone, full address, exact coordin
 - `mailer.py` - dev outbox / SMTP email helpers
 - `schema.sql` - MySQL schema and reference subjects
 - `migrations/001_signup_fields.sql` - upgrade existing databases with the sign-up columns
+- `migrations/002_backfill_name_parts.py` - safely split existing display names into first/middle/last parts
 - `seed_demo.py` - fictional demo account/profile seeder
 - `uploads/avatars/` - optional profile photos (local, git-ignored)
 - `docs/` - product, API, and data documentation for Phases 1–2

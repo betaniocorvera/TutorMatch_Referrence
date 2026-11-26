@@ -86,9 +86,10 @@ OTP_EXPIRY_MINUTES = 5          # verification code lifetime
 OTP_MAX_ATTEMPTS = 5            # wrong code tries before it is burned
 OTP_RESEND_SECONDS = 60         # minimum wait between code requests
 RESET_TOKEN_EXPIRY_MINUTES = 30 # password-reset link lifetime
-# Idle lifetime for a normal login. The timer restarts on real user
-# activity and expires when the tab is left alone. Use 900 for the
-# required 15-minute idle timeout.
+# Idle lifetime for a normal login. This is the short demo value used
+# for the defense: the session expires after 10 seconds without real
+# mouse, keyboard, scroll, or touch activity. Set this to 900 for the
+# production 15-minute timeout.
 SESSION_IDLE_TIMEOUT_SECONDS = 10
 REMEMBER_TIMEOUT_DAYS = 7       # "Keep me signed in" lifetime
 
@@ -290,9 +291,11 @@ def check_session_and_csrf():
         if session_expired():
             clear_user_session()
         elif session_should_touch():
-            # Sliding idle timeout: real requests restart the clock.
-            # Background pollers do not, so an untouched tab expires.
-            touch_user_session()
+            # Sliding idle timeout: real requests and browser activity
+            # pings restart the clock. Background pollers do not, so an
+            # untouched tab expires after the AFK window.
+            if int(session.get("idle_seconds") or 0) > 0:
+                touch_user_session(SESSION_IDLE_TIMEOUT_SECONDS)
 
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         if not csrf_token_is_valid():
@@ -2494,6 +2497,22 @@ def auth_me():
     return jsonify({
         "user": public_user(user, state),
         "onboardingRequired": state["onboardingRequired"],
+    })
+
+
+@app.get("/api/session/ping")
+@login_required
+def session_ping():
+    """
+    Refresh the idle timer after real browser activity.
+
+    The browser calls this a few seconds apart and only after a mouse,
+    keyboard, scroll, or touch event. Background polls never call it, so
+    a tab with no activity expires after SESSION_IDLE_TIMEOUT_SECONDS.
+    """
+    return jsonify({
+        "ok": True,
+        "idleSeconds": SESSION_IDLE_TIMEOUT_SECONDS,
     })
 
 

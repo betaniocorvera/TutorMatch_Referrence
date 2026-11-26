@@ -14,7 +14,7 @@
     { id: 3, label: 'Goals & style', hint: 'How you like to work' },
     { id: 4, label: 'Availability', hint: 'When you are free' },
     { id: 5, label: 'Rate & format', hint: 'Budget and session type' },
-    { id: 6, label: 'Area', hint: 'Barangay-level only' },
+    { id: 6, label: 'Area & details', hint: 'Barangay-level only' },
     { id: 7, label: 'Preview', hint: 'Review and finish' },
     { id: 8, label: 'Recovery', hint: '3 security questions' }
   ];
@@ -62,6 +62,30 @@
   ];
 
   const REQUIRED_FIELDS = ['bio', 'subjects', 'availability', 'rate', 'budget', 'format', 'area'];
+  const NAME_PATTERN = new RegExp("^[\\p{L} .'\\-]+$", 'u');
+  const LETTER_PATTERN = new RegExp('\\p{L}', 'u');
+
+  function namePartProblem(raw, required) {
+    const text = String(raw || '').trim();
+    if (!text) return required ? 'Enter this name.' : '';
+    if (text.length > 50) return 'Keep this under 50 characters.';
+    if (!LETTER_PATTERN.test(text) || !NAME_PATTERN.test(text)) {
+      return 'Use letters, spaces, hyphens, apostrophes or periods only.';
+    }
+    return '';
+  }
+
+  function composeLocalName(profile) {
+    return [profile.firstName, profile.middleName, profile.lastName]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function syncLocalName() {
+    if (!state.profile) return;
+    state.profile.name = composeLocalName(state.profile);
+  }
 
   function visibleStepIds() {
     return STEPS
@@ -243,7 +267,10 @@
 
   function markInvalid(field, invalid) {
     const map = {
-      name: ['#ob-name'],
+      firstName: ['#ob-first-name'],
+      middleName: ['#ob-middle-name'],
+      lastName: ['#ob-last-name'],
+      name: ['#ob-first-name', '#ob-middle-name', '#ob-last-name'],
       headline: ['#ob-headline'],
       bio: ['#ob-bio'],
       birthdate: ['#ob-birthdate'],
@@ -283,6 +310,9 @@
 
   function stepForField(field) {
     const map = {
+      firstName: 1,
+      middleName: 1,
+      lastName: 1,
       name: 1,
       headline: 1,
       bio: 1,
@@ -462,12 +492,16 @@
   function renderBasics() {
     const profile = state.profile;
     if (!profile) return;
-    const name = $('#ob-name');
+    const firstName = $('#ob-first-name');
+    const middleName = $('#ob-middle-name');
+    const lastName = $('#ob-last-name');
     const headline = $('#ob-headline');
     const bio = $('#ob-bio');
     const birthdate = $('#ob-birthdate');
     const status = $('#ob-status');
-    if (name) name.value = profile.name || '';
+    if (firstName) firstName.value = profile.firstName || '';
+    if (middleName) middleName.value = profile.middleName || '';
+    if (lastName) lastName.value = profile.lastName || '';
     if (headline) headline.value = profile.headline || '';
     if (bio) bio.value = profile.bio || '';
     if (birthdate) birthdate.value = profile.birthdate || '';
@@ -966,13 +1000,27 @@
     const profile = state.profile;
 
     if (step === 1) {
-      const name = String(profile.name || '').trim();
-      const bio = String(profile.bio || '').trim();
-      const headline = String(profile.headline || '').trim();
-      if (name.length < 2 || name.length > 80) {
-        setFieldError('name', 'Enter your display name (2–80 characters).');
+      const firstProblem = namePartProblem(profile.firstName, true);
+      if (firstProblem) {
+        setFieldError('firstName', firstProblem);
         ok = false;
       }
+      const middleProblem = namePartProblem(profile.middleName, false);
+      if (middleProblem) {
+        setFieldError('middleName', middleProblem);
+        ok = false;
+      }
+      const lastProblem = namePartProblem(profile.lastName, true);
+      if (lastProblem) {
+        setFieldError('lastName', lastProblem);
+        ok = false;
+      }
+      if (!firstProblem && !lastProblem && composeLocalName(profile).length > 80) {
+        setFieldError('lastName', 'Your full name is too long.');
+        ok = false;
+      }
+      const bio = String(profile.bio || '').trim();
+      const headline = String(profile.headline || '').trim();
       if (bio.length < 10) {
         setFieldError('bio', 'Write at least 10 characters about yourself.');
         ok = false;
@@ -1119,8 +1167,10 @@
 
   function canAutosave(step) {
     if (!state.profile) return false;
-    if (step === 1 && String(state.profile.name || '').trim().length < 2) {
-      return false;
+    if (step === 1) {
+      return !namePartProblem(state.profile.firstName, true)
+        && !namePartProblem(state.profile.middleName, false)
+        && !namePartProblem(state.profile.lastName, true);
     }
     return true;
   }
@@ -1131,6 +1181,9 @@
 
     if (step === 1) {
       payload.name = String(profile.name || '').trim();
+      payload.firstName = String(profile.firstName || '').trim();
+      payload.middleName = String(profile.middleName || '').trim();
+      payload.lastName = String(profile.lastName || '').trim();
       payload.headline = String(profile.headline || '').trim();
       payload.bio = String(profile.bio || '').trim();
       payload.birthdate = profile.birthdate || '';
@@ -1281,6 +1334,9 @@
     const profile = state.profile;
     const payload = {
       name: String(profile.name || '').trim(),
+      firstName: String(profile.firstName || '').trim(),
+      middleName: String(profile.middleName || '').trim(),
+      lastName: String(profile.lastName || '').trim(),
       headline: String(profile.headline || '').trim(),
       bio: String(profile.bio || '').trim(),
       birthdate: profile.birthdate || '',
@@ -1444,8 +1500,19 @@
     if (!target || !target.id) return;
 
     switch (target.id) {
-      case 'ob-name':
-        state.profile.name = target.value;
+      case 'ob-first-name':
+        state.profile.firstName = target.value;
+        syncLocalName();
+        scheduleAutosave();
+        break;
+      case 'ob-middle-name':
+        state.profile.middleName = target.value;
+        syncLocalName();
+        scheduleAutosave();
+        break;
+      case 'ob-last-name':
+        state.profile.lastName = target.value;
+        syncLocalName();
         scheduleAutosave();
         break;
       case 'ob-headline':
@@ -1690,13 +1757,15 @@
   function applyPostSignupBasics() {
     if (!state.profile) return;
     const profile = state.profile;
-    // A full sign-up already collected the name, bio, and birthdate.
+    // A full sign-up already collected the name parts, bio, and birthdate.
     // For new accounts the first step only needs the photo and status.
-    // Edit mode and legacy profiles keep every basics field visible.
+    // Edit mode and legacy profiles without name parts keep the fields
+    // visible so existing accounts can complete them.
     const cameFromSignup = Boolean(
-      String(profile.bio || '').trim()
+      String(profile.firstName || '').trim()
+      && String(profile.lastName || '').trim()
+      && String(profile.bio || '').trim()
       && profile.birthdate
-      && String(profile.name || '').trim()
     );
     const hide = cameFromSignup && !state.edit;
     $$('[data-signup-filled]').forEach((field) => {
@@ -1719,7 +1788,8 @@
       return;
     }
 
-    state.edit = new URLSearchParams(global.location.search).has('edit');
+    const params = new URLSearchParams(global.location.search);
+    state.edit = params.has('edit');
 
     try {
       const [profile, catalog, securityBank, savedQuestions] = await Promise.all([
@@ -1755,7 +1825,7 @@
       }
 
       const requestedStep = state.edit
-        ? 1
+        ? clamp(Number(params.get('step')) || 1, 1, 8)
         : clamp(Number(profile.onboardingStep) || 1, 1, 8);
       state.step = state.skippedSteps.has(requestedStep)
         ? firstVisibleFrom(requestedStep)

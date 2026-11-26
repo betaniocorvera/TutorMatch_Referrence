@@ -25,6 +25,13 @@
     adult: 'Adult learner'
   };
 
+  const GENDERS = {
+    male: 'Male',
+    female: 'Female',
+    other: 'Other',
+    prefer_not_to_say: 'Prefer not to say'
+  };
+
   const SLOT_LABELS = {
     '08:00': '8a',
     '13:00': '1p',
@@ -72,6 +79,105 @@
     const min = formatMoney(profile.budgetMinCentavos);
     const max = formatMoney(profile.budgetMaxCentavos);
     return min && max ? `${min}–${max}` : 'Not set';
+  }
+
+  function fact(label, value, note) {
+    return `
+      <div class="profile-fact">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+        ${note ? `<em>${escapeHtml(note)}</em>` : ''}
+      </div>
+    `;
+  }
+
+  function backgroundMarkup(profile) {
+    if (!profile) return '<span class="muted-note">No background details yet.</span>';
+    const facts = [];
+    if (profile.gender) {
+      facts.push(fact('Gender', GENDERS[profile.gender] || profile.gender));
+    }
+    if (profile.school) facts.push(fact('School', profile.school));
+    if (profile.gradeLevel) facts.push(fact('Grade / year level', profile.gradeLevel));
+    if (profile.course) facts.push(fact('Course / strand', profile.course));
+    if (profile.education) facts.push(fact('Highest education', profile.education));
+    if (profile.experienceYears !== null && profile.experienceYears !== undefined) {
+      const years = Number(profile.experienceYears);
+      facts.push(fact('Experience', `${years} ${years === 1 ? 'year' : 'years'}`));
+    }
+    return facts.length
+      ? facts.join('')
+      : '<span class="muted-note">No background details yet. Use Edit profile to add them.</span>';
+  }
+
+  function contactMarkup(profile) {
+    if (!profile) return '<span class="muted-note">No contact details yet.</span>';
+    const facts = [];
+    if (profile.phone) {
+      facts.push(fact(
+        'Phone',
+        profile.phone,
+        profile.showPhone ? 'Shared with accepted matches' : 'Private'
+      ));
+    } else {
+      facts.push(fact('Phone', 'Not added', 'Optional'));
+    }
+
+    const hasAddress = Boolean(
+      profile.addressLine || profile.province || profile.postalCode
+    );
+    const address = hasAddress
+      ? [
+          profile.addressLine,
+          profile.area && profile.area.barangay,
+          profile.area && profile.area.city,
+          profile.province,
+          profile.postalCode
+        ].filter(Boolean).join(', ')
+      : '';
+    if (address) {
+      facts.push(fact(
+        'Full address',
+        address,
+        profile.showAddress ? 'Shared with accepted matches' : 'Private'
+      ));
+    } else {
+      facts.push(fact('Full address', 'Not added', 'Optional'));
+    }
+    return facts.join('');
+  }
+
+  function renderDetailsBanner(profile) {
+    const banner = document.getElementById('profile-details-banner');
+    const message = document.getElementById('profile-details-message');
+    if (!banner || !message) return;
+
+    const missing = [];
+    let step = 6;
+    if (!profile || !profile.firstName || !profile.lastName) {
+      missing.push('your first and last name');
+      step = 1;
+    }
+    if (profile && !profile.gender) missing.push('gender');
+    if (profile && !profile.school && !profile.education) {
+      missing.push('school or education');
+    }
+    if (profile && !(profile.area && profile.area.barangay)) {
+      missing.push('barangay');
+    }
+
+    if (!missing.length) {
+      banner.hidden = true;
+      message.textContent = '';
+      return;
+    }
+
+    const summary = missing.slice(0, 3).join(', ');
+    const rest = missing.length > 3 ? ` and ${missing.length - 3} more` : '';
+    message.innerHTML =
+      `Complete your sign-up details: ${escapeHtml(summary + rest)}. ` +
+      `<a href="onboarding.html?edit=1&step=${step}">Update now</a>`;
+    banner.hidden = false;
   }
 
   function availabilityText(availability) {
@@ -125,6 +231,10 @@
     const priceEl = document.getElementById('profile-page-price');
     const formatEl = document.getElementById('profile-page-format');
     const areaEl = document.getElementById('profile-page-area');
+    const backgroundEl = document.getElementById('profile-page-background');
+    const contactEl = document.getElementById('profile-page-contact');
+
+    renderDetailsBanner(profile);
 
     if (avatar) {
       if (profile && profile.photoUrl) {
@@ -177,6 +287,8 @@
       const text = [area && area.barangay, area && area.city].filter(Boolean).join(', ');
       areaEl.textContent = text || 'Not set';
     }
+    if (backgroundEl) backgroundEl.innerHTML = backgroundMarkup(profile);
+    if (contactEl) contactEl.innerHTML = contactMarkup(profile);
   }
 
   global.TutorMatchProfile = { init: render, render };

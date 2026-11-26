@@ -241,6 +241,20 @@ Response `200`:
 }
 ```
 
+### GET `/api/session/ping`
+
+Session required. Refreshes the sliding idle timer after real browser
+activity. The client calls this only after mouse, keyboard, scroll, or
+touch activity. Background notification and message polls do not call it,
+so an AFK tab still expires.
+
+The defense demo uses `SESSION_IDLE_TIMEOUT_SECONDS = 10`; set it to `900`
+for the production 15-minute timeout.
+
+```json
+{ "ok": true, "idleSeconds": 10 }
+```
+
 ### POST `/api/auth/forgot-password` (V1.5)
 
 Request:

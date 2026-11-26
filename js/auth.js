@@ -16,6 +16,21 @@
   let sentRequestsCache = [];
   let sentRequestIds = new Set();
 
+  const ACTIVITY_EVENTS = [
+    'pointerdown',
+    'pointermove',
+    'keydown',
+    'scroll',
+    'touchstart',
+    'wheel'
+  ];
+  // The defense demo uses a 10-second idle timeout. Ping well inside
+  // that window so active use keeps the session alive.
+  const ACTIVITY_PING_INTERVAL_MS = 4 * 1000;
+  let activityTrackingStarted = false;
+  let lastActivityPingAt = 0;
+  let activityPingInFlight = false;
+
   class ApiError extends Error {
     constructor(message, options = {}) {
       super(message || 'Request failed.');
@@ -57,6 +72,8 @@
       profileCache = null;
     }
     currentUser = nextUser;
+    if (currentUser) startActivityTracking();
+    else stopActivityTracking();
     return currentUser;
   }
 
@@ -69,6 +86,52 @@
     profileCache = null;
     sentRequestsCache = [];
     sentRequestIds = new Set();
+    stopActivityTracking();
+  }
+
+  /* A session only counts as active when the person actually interacts
+     with the page. Background polls never call this, so leaving the tab
+     alone still expires the server session after the idle window. */
+  function noteActivity() {
+    if (!currentUser || activityPingInFlight) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastActivityPingAt < ACTIVITY_PING_INTERVAL_MS) return;
+    lastActivityPingAt = now;
+    activityPingInFlight = true;
+    apiFetch('/api/session/ping')
+      .catch(() => {
+        /* A 401 is already handled by apiFetch's expiry redirect. */
+      })
+      .finally(() => {
+        activityPingInFlight = false;
+      });
+  }
+
+  function startActivityTracking() {
+    if (activityTrackingStarted || typeof global.addEventListener !== 'function') {
+      return;
+    }
+    activityTrackingStarted = true;
+    lastActivityPingAt = Date.now();
+    ACTIVITY_EVENTS.forEach((eventName) => {
+      global.addEventListener(eventName, noteActivity, {
+        passive: true,
+        capture: true
+      });
+    });
+  }
+
+  function stopActivityTracking() {
+    if (!activityTrackingStarted) return;
+    ACTIVITY_EVENTS.forEach((eventName) => {
+      global.removeEventListener(eventName, noteActivity, { capture: true });
+    });
+    activityTrackingStarted = false;
+    lastActivityPingAt = 0;
+    activityPingInFlight = false;
   }
 
   function invalidateCsrf() {

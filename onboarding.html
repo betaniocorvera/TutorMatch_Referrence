@@ -115,9 +115,21 @@
 
               <div class="field-grid">
                 <div class="field-block" data-signup-filled>
-                  <label class="field-label" for="ob-name">Display name</label>
-                  <input id="ob-name" class="ob-field" type="text" maxlength="80" autocomplete="name" placeholder="Your name" />
-                  <p class="ob-error" data-error-for="name"></p>
+                  <label class="field-label" for="ob-first-name">First name</label>
+                  <input id="ob-first-name" class="ob-field" type="text" maxlength="50" autocomplete="given-name" placeholder="Maria" />
+                  <p class="ob-error" data-error-for="firstName"></p>
+                </div>
+
+                <div class="field-block" data-signup-filled>
+                  <label class="field-label" for="ob-middle-name">Middle name <span class="optional">optional</span></label>
+                  <input id="ob-middle-name" class="ob-field" type="text" maxlength="50" autocomplete="additional-name" placeholder="Santos" />
+                  <p class="ob-error" data-error-for="middleName"></p>
+                </div>
+
+                <div class="field-block" data-signup-filled>
+                  <label class="field-label" for="ob-last-name">Last name</label>
+                  <input id="ob-last-name" class="ob-field" type="text" maxlength="50" autocomplete="family-name" placeholder="Reyes" />
+                  <p class="ob-error" data-error-for="lastName"></p>
                 </div>
 
                 <div class="field-block" data-signup-filled>
@@ -260,8 +272,8 @@
             <section class="step-panel" data-panel="6">
               <div class="step-head">
                 <p class="eyebrow">Step 6</p>
-                <h2 tabindex="-1">Your area</h2>
-                <p>We only show your barangay, never your exact address.</p>
+                <h2 tabindex="-1">Area and personal details</h2>
+                <p>We only show your barangay publicly. Phone and full address stay private unless you share them with accepted matches.</p>
               </div>
 
               <div class="field-grid">

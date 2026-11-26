@@ -213,7 +213,7 @@ page's register tab is a link to this page.
 
 Eight steps with a progress indicator. Autosave after each step.
 
-1. **Basics** — photo, display name, bio, birthdate (private), status.
+1. **Basics** — photo, first/middle/last name, bio, birthdate (private), status.
 2. **Subjects and levels** — what the tutor teaches or the student needs.
 3. **Goals and style** — learning goal, teaching/learning style.
 4. **Availability** — weekly slots using a 30- or 60-minute grid.
@@ -223,7 +223,9 @@ Eight steps with a progress indicator. Autosave after each step.
 8. **Recovery** — 3 security questions.
 
 New accounts skip steps 4, 6, and 8 because sign-up already collected that
-information. Edit mode keeps all steps.
+information. Edit mode keeps all steps so existing accounts can fill the same
+name parts and personal details. Deep links such as
+`/onboarding?edit=1&step=6` open a specific step.
 
 Rules:
 - Required fields cannot be skipped.
@@ -270,6 +272,7 @@ Rules:
 
 - Sectioned form matching onboarding.
 - Photo upload with crop/preview and a default avatar fallback.
+- The dashboard profile summary shows public background details (gender, school, grade, course, education, experience), barangay/city, contact privacy state, and a prompt when sign-up details are missing.
 - Completeness meter with a checklist of missing items.
 - “Preview how others see you” action.
 - Privacy note beside the area field: “Only your barangay is shown.”
