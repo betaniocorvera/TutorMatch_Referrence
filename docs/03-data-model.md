@@ -423,6 +423,7 @@ Pair score:
 For the capstone defense, compare the current weighted ranker against:
 
 - A subject-only baseline.
+- A content-based k-NN baseline (cosine nearest-neighbour over profile vectors).
 - A random baseline (fixed seed).
 - A popularity baseline (request counts, then profile completeness).
 

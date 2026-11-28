@@ -94,7 +94,7 @@ Run the offline ranking evaluation from the project root:
 py evaluation.py
 ```
 
-The script compares the current weighted ranker with subject-only, random, and popularity baselines on `mock/evaluation_labels.json`, then prints live request, session, message, report, and analytics metrics. It is read-only unless `--json PATH` is supplied. See [04-evaluation.md](04-evaluation.md) for methodology, results, and limitations.
+The script compares the current weighted ranker with k-NN, subject-only, random, and popularity baselines on `mock/evaluation_labels.json`, then prints live request, session, message, report, and analytics metrics. It is read-only unless `--json PATH` is supplied. See [04-evaluation.md](04-evaluation.md) for methodology, results, and limitations.
 
 ## Verification commands
 

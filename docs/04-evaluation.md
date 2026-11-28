@@ -9,7 +9,7 @@ This document explains how TutorMatch A.I. evaluates its search ranking for the 
 
 ## 2. Research question
 
-> Does the current weighted TutorMatch ranker place relevant tutors or students above simple subject-only, popularity, and random baselines?
+> Does the current weighted TutorMatch ranker place relevant tutors or students above content-based k-NN, subject-only, popularity, and random baselines?
 
 The current ranker combines subject/level fit, availability overlap, budget/rate fit, distance, style/goal overlap, and profile completeness. The baselines isolate one signal at a time.
 
@@ -43,11 +43,38 @@ Only accounts with `@example.test` emails are included in the evaluation pool. R
 | Model | Ranking signal |
 |---|---|
 | `current_weighted` | The production weighted ranker: subject/level, availability, budget/rate, distance, style/goal, and completeness |
+| `knn_similarity` | Content-based k-NN: cosine similarity between the query vector and each profile vector |
 | `subject_only` | Matching subject and level, then verification and name |
 | `popularity` | Number of requests involving the candidate, then profile completeness |
 | `random` | Uniform shuffle with a fixed seed (`42`) for reproducibility |
 
 All models use the same candidate pool and the same relevance labels.
+
+### The k-NN baseline
+
+`knn_similarity` is an unsupervised nearest-neighbour ranker. It does not
+learn weights from the labels, so the comparison stays honest.
+
+Each profile is encoded as weighted feature blocks:
+
+| Block | Dimensions | Weight |
+|---|---|---|
+| `subject` | One dim per subject id in the query pool | 0.35 |
+| `level` | 5 study levels | 0.10 |
+| `style` | 6 style tags | 0.10 |
+| `goal` | 6 goal tags | 0.10 |
+| `format` | Can meet online, can meet in person | 0.06 |
+| `distance` | Normalized distance (neutral for online-only) | 0.10 |
+| `availability` | Weekly coverage, one dim per day | 0.15 |
+| `quality` | Verified flag and response speed | 0.04 |
+
+The query vector is built from the label's subject, level, format, and tag
+filters. When the query leaves a field open, the viewer's own profile fills it
+in. Each block is scaled to unit length and blocks are compared with cosine
+similarity, so a candidate's final score is the weighted sum of eight cosine
+similarities. Ranking by that score is equivalent to ordering candidates by
+Euclidean nearest-neighbour distance in the concatenated unit-length space.
+
 
 ## 5. Metrics
 
@@ -66,28 +93,29 @@ Run:
 py evaluation.py
 ```
 
-Latest run on 2026-11-10:
+Latest run on 2026-11-27:
 
 ```text
 Per-query precision@1
-query                     | pool | relevant | current | subject | popular | random
---------------------------+------+----------+---------+---------+---------+-------
-student_calculus          | 1    | 1        | 1.0     | 1.0     | 1.0     | 1.0
-student_physics           | 2    | 1        | 1.0     | 1.0     | 0.0     | 0.0
-student_programming       | 2    | 1        | 1.0     | 1.0     | 0.0     | 0.0
-student_math_senior_high  | 3    | 2        | 1.0     | 1.0     | 1.0     | 1.0
-student_english           | 1    | 1        | 1.0     | 1.0     | 1.0     | 1.0
-tutor_calculus            | 1    | 1        | 1.0     | 1.0     | 1.0     | 1.0
-tutor_programming         | 2    | 1        | 1.0     | 1.0     | 1.0     | 0.0
-tutor_chemistry           | 2    | 1        | 1.0     | 1.0     | 1.0     | 0.0
-tutor_english_high_school | 2    | 1        | 1.0     | 1.0     | 0.0     | 0.0
+query                     | pool | relevant | current | knn | subject | popular | random
+--------------------------+------+----------+---------+-----+---------+---------+-------
+student_calculus          | 1    | 1        | 1.0     | 1.0 | 1.0     | 1.0     | 1.0
+student_physics           | 2    | 1        | 1.0     | 1.0 | 1.0     | 0.0     | 0.0
+student_programming       | 2    | 1        | 1.0     | 0.0 | 1.0     | 0.0     | 0.0
+student_math_senior_high  | 3    | 2        | 1.0     | 1.0 | 1.0     | 1.0     | 1.0
+student_english           | 1    | 1        | 1.0     | 1.0 | 1.0     | 1.0     | 1.0
+tutor_calculus            | 1    | 1        | 1.0     | 1.0 | 1.0     | 1.0     | 1.0
+tutor_programming         | 2    | 1        | 1.0     | 1.0 | 1.0     | 0.0     | 0.0
+tutor_chemistry           | 2    | 1        | 1.0     | 1.0 | 1.0     | 0.0     | 0.0
+tutor_english_high_school | 2    | 1        | 1.0     | 1.0 | 1.0     | 0.0     | 0.0
 
 Aggregate ranking quality
 model            | P@1    | P@3    | P@5    | MRR
 -----------------+--------+--------+--------+-------
 current_weighted | 1.0    | 0.3703 | 0.2222 | 1.0
+knn_similarity   | 0.8889 | 0.3703 | 0.2222 | 0.9444
 subject_only     | 1.0    | 0.3703 | 0.2222 | 1.0
-popularity       | 0.6667 | 0.3703 | 0.2222 | 0.8333
+popularity       | 0.4444 | 0.3703 | 0.2222 | 0.7222
 random           | 0.4444 | 0.3703 | 0.2222 | 0.7222
 ```
 
@@ -95,6 +123,11 @@ random           | 0.4444 | 0.3703 | 0.2222 | 0.7222
 
 - The current weighted ranker places a relevant result first on every label.
 - The subject-only baseline also places a relevant result first on every label, which is expected: the labels are subject-driven and the candidate pools are small.
+- The k-NN baseline ranks the relevant candidate first on eight of nine queries
+  (P@1 `0.8889`, MRR `0.9444`). It misses `student_programming`, where the
+  relevant online tutor has no weekly availability overlap with the student,
+  while the distractor shares every style and goal tag and the same barangay.
+  Cosine similarity without a hard availability filter cannot separate them.
 - Popularity and random baselines fail on several two-candidate queries, so their P@1 and MRR are lower.
 - P@3 and P@5 are identical across models because every relevant candidate already appears in the top three. With four demo profiles per role, most pools contain only one to three compatible candidates.
 - These results are a sanity check, not evidence of superiority over a large-scale search system. The strongest defensible claim is that the current ranker preserves subject relevance while adding the other product signals.
@@ -140,6 +173,7 @@ Do not commit generated result files unless the defense requires a frozen snapsh
 - **Demo profiles only.** The pilot uses fictional `@example.test` profiles, not real Cabadbaran users.
 - **No click logs yet.** Live metrics are useful only after real or realistic demo sessions. The system logs events from day one, but the dataset is still tiny.
 - **Popularity is sparse.** With no request history, the popularity baseline falls back to profile completeness, which is a weak proxy.
+- **The k-NN baseline is unsupervised.** It has no learned parameters, so it measures how far hand-engineered similarity gets without training data. A supervised classifier (for example a learned k-NN or learning-to-rank model) needs far more labelled queries and real interaction history than this pilot has.
 
 ## 10. Privacy and ethics
 
